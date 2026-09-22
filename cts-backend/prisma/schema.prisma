@@ -1,0 +1,39 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Report {
+  id           String   @id @default(uuid())
+  name         String
+  period       String?
+  totalTickets Int      @default(0)
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  tickets      Ticket[]
+
+  @@map("reports")
+}
+
+model Ticket {
+  id                 String  @id @default(uuid())
+  reportId           String  @map("report_id")
+  key                String
+  system             String
+  status             String
+  businessUnit       String  @map("business_unit")
+  typeOfIssue        String  @map("type_of_issue")
+  recurringCategory  String?  @map("recurring_category")
+  standaloneCategory String?  @map("standalone_category")
+  summary            String?
+
+  report Report @relation(fields: [reportId], references: [id], onDelete: Cascade)
+
+  @@index([reportId])
+  @@map("tickets")
+}
