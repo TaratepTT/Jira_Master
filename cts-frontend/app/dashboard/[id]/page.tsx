@@ -751,7 +751,20 @@ export default function DashboardPage() {
                     onClick={() => setSelectedTicket(t)}
                     className="border-b border-slate-100 dark:border-slate-700/50 hover:bg-blue-50 dark:hover:bg-blue-950/20 cursor-pointer transition-colors"
                   >
-                    <td className="py-2 px-3 font-medium text-blue-600 dark:text-blue-400 whitespace-nowrap">{t.key}</td>
+                    <td className="py-2 px-3 font-medium whitespace-nowrap">
+                      <a
+                        href={`https://ascendcommerce-support.atlassian.net/browse/${t.key}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={(e) => e.stopPropagation()}
+                        className="text-blue-600 dark:text-blue-400 hover:underline inline-flex items-center gap-1"
+                      >
+                        {t.key}
+                        <svg className="h-3 w-3 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
+                        </svg>
+                      </a>
+                    </td>
                     <td className="py-2 px-3 text-slate-700 dark:text-slate-200 max-w-[160px] truncate">{t.summary || '—'}</td>
                     <td className="py-2 px-3 text-slate-600 dark:text-slate-300 max-w-[120px] truncate">{t.businessUnit || '—'}</td>
                     <td className="py-2 px-3">
