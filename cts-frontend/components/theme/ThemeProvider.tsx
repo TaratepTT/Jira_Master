@@ -9,7 +9,10 @@ interface ThemeContextValue {
   toggleTheme: () => void
 }
 
-const ThemeContext = createContext<ThemeContextValue | undefined>(undefined)
+const ThemeContext = createContext<ThemeContextValue>({
+  theme: 'light',
+  toggleTheme: () => {},
+})
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const [theme, setTheme] = useState<Theme>('light')
@@ -31,18 +34,18 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 
   const toggleTheme = () => setTheme(t => (t === 'light' ? 'dark' : 'light'))
 
-  // Avoid flash of wrong theme on first paint
-  if (!mounted) return <div style={{ visibility: 'hidden' }}>{children}</div>
-
+  // Always provide the context — during SSR/build, theme defaults to 'light'
+  // and toggleTheme is a no-op until mounted. This prevents "useTheme must be
+  // used within ThemeProvider" errors during Next.js static generation.
   return (
     <ThemeContext.Provider value={{ theme, toggleTheme }}>
-      {children}
+      <div style={mounted ? undefined : { visibility: 'hidden' }}>
+        {children}
+      </div>
     </ThemeContext.Provider>
   )
 }
 
 export function useTheme() {
-  const ctx = useContext(ThemeContext)
-  if (!ctx) throw new Error('useTheme must be used within ThemeProvider')
-  return ctx
+  return useContext(ThemeContext)
 }
