@@ -55,6 +55,12 @@ function formatDate(d?: string) {
   if (isNaN(date.getTime())) return d
   return date.toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: 'numeric' })
 }
+function isClosedStatus(s: string) {
+  return s.toLowerCase().includes('closed') || s.toLowerCase().includes('done')
+}
+function isL3Status(s: string) {
+  return s.toLowerCase().includes('l3') || s.toLowerCase().includes('investigate')
+}
 
 // ── Sub-components ────────────────────────────────────────────
 function ProgressBar({ label, count, total, color = 'bg-blue-500' }: { label: string; count: number; total: number; color?: string }) {
@@ -150,6 +156,104 @@ function MultiSelectFilter({ label, options, selected, onChange }: MultiSelectPr
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+// ── Filtered Insights panel ────────────────────────────────────
+// Shows a mini-dashboard summarising the currently filtered ticket set.
+// Only rendered when at least one filter or search term is active.
+function FilteredInsights({ tickets }: { tickets: TicketDetail[] }) {
+  const total = tickets.length
+  if (!total) return null
+
+  const closedN    = tickets.filter(t => isClosedStatus(t.status)).length
+  const l3N        = tickets.filter(t => isL3Status(t.status)).length
+  const deployedN  = tickets.filter(t => !!t.deployDate).length
+
+  const statusCounts: Record<string, number> = {}
+  const buCounts: Record<string, number> = {}
+  tickets.forEach(t => {
+    const s = t.status || 'ไม่ระบุ'
+    const b = t.businessUnit || 'ไม่ระบุ'
+    statusCounts[s] = (statusCounts[s] ?? 0) + 1
+    buCounts[b] = (buCounts[b] ?? 0) + 1
+  })
+  const statusEntries = Object.entries(statusCounts).sort((a, b) => b[1] - a[1])
+  const buEntries = Object.entries(buCounts).sort((a, b) => b[1] - a[1]).slice(0, 8)
+
+  return (
+    <div className="mb-5 rounded-2xl border border-blue-100 bg-blue-50/40 p-5 space-y-5">
+      <div className="flex items-center gap-2">
+        <svg className="h-4 w-4 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 3v18h18M18.7 8l-5.1 5.1-2.8-2.8L7 14" />
+        </svg>
+        <h3 className="text-sm font-semibold text-slate-700">ภาพรวมของข้อมูลที่กรองอยู่</h3>
+      </div>
+
+      {/* KPI strip */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div className="rounded-xl bg-white border border-slate-200 p-3">
+          <p className="text-xl font-semibold text-slate-800">{total}</p>
+          <p className="text-xs text-slate-400 mt-0.5">Tickets ที่กรองได้</p>
+        </div>
+        <div className="rounded-xl bg-white border border-slate-200 p-3">
+          <p className="text-xl font-semibold text-green-600">{pct(closedN, total)}%</p>
+          <p className="text-xs text-slate-400 mt-0.5">Closure rate ({closedN})</p>
+        </div>
+        <div className="rounded-xl bg-white border border-slate-200 p-3">
+          <p className={`text-xl font-semibold ${l3N ? 'text-orange-600' : 'text-slate-800'}`}>{l3N}</p>
+          <p className="text-xs text-slate-400 mt-0.5">L3 escalation</p>
+        </div>
+        <div className="rounded-xl bg-white border border-slate-200 p-3">
+          <p className="text-xl font-semibold text-indigo-600">{pct(deployedN, total)}%</p>
+          <p className="text-xs text-slate-400 mt-0.5">Deployed ({deployedN}/{total})</p>
+        </div>
+      </div>
+
+      {/* Status + BU breakdown of filtered subset */}
+      <div className="grid gap-4 md:grid-cols-2">
+        <div className="rounded-xl bg-white border border-slate-200 p-4">
+          <p className="text-xs font-semibold text-slate-600 mb-3">Status ในกลุ่มที่กรอง</p>
+          {statusEntries.map(([s, c]) => (
+            <div key={s} className="mb-2.5 last:mb-0">
+              <div className="flex justify-between items-center text-xs text-slate-600 mb-1">
+                <span className={`inline-block px-2 py-0.5 rounded-full text-[11px] font-medium ${statusBadge(s)}`}>{s}</span>
+                <span className="font-medium">{c} · {pct(c, total)}%</span>
+              </div>
+              <div className="h-1.5 rounded-full bg-slate-100 overflow-hidden">
+                <div className="h-full rounded-full bg-slate-400" style={{ width: `${pct(c, total)}%` }} />
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div className="rounded-xl bg-white border border-slate-200 p-4">
+          <p className="text-xs font-semibold text-slate-600 mb-3">Business Unit ในกลุ่มที่กรอง</p>
+          {buEntries.map(([b, c]) => (
+            <div key={b} className="mb-2.5 last:mb-0">
+              <div className="flex justify-between items-center text-xs text-slate-600 mb-1">
+                <span className="truncate max-w-[160px]">{b}</span>
+                <span className="font-medium flex-shrink-0">{c} · {pct(c, total)}%</span>
+              </div>
+              <div className="h-1.5 rounded-full bg-slate-100 overflow-hidden">
+                <div className="h-full rounded-full bg-purple-400" style={{ width: `${pct(c, total)}%` }} />
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Deploy progress bar */}
+      <div className="rounded-xl bg-white border border-slate-200 p-4">
+        <div className="flex justify-between items-center text-xs text-slate-600 mb-1.5">
+          <span className="font-medium">Deploy Progress</span>
+          <span>{deployedN} deployed · {total - deployedN} pending</span>
+        </div>
+        <div className="h-2.5 rounded-full bg-slate-100 overflow-hidden flex">
+          <div className="h-full bg-indigo-500" style={{ width: `${pct(deployedN, total)}%` }} />
+        </div>
+      </div>
     </div>
   )
 }
@@ -256,7 +360,6 @@ export default function DashboardPage() {
   const [selectedTicket, setSelectedTicket] = useState<TicketDetail | null>(null)
   const [search, setSearch] = useState('')
 
-  // ── Filter state ──────────────────────────────────────────
   const [buFilter, setBuFilter]         = useState<string[]>([])
   const [statusFilter, setStatusFilter] = useState<string[]>([])
   const [systemFilter, setSystemFilter] = useState<string[]>([])
@@ -268,7 +371,6 @@ export default function DashboardPage() {
       .catch(e => setError(e?.response?.data?.message ?? 'โหลด report ไม่สำเร็จ'))
   }, [id])
 
-  // ── Filter options derived from tickets (must run before any early return) ──
   const buOptions = useMemo(() => {
     if (!data) return []
     const counts: Record<string, number> = {}
@@ -276,9 +378,7 @@ export default function DashboardPage() {
       const bu = t.businessUnit || 'ไม่ระบุ'
       counts[bu] = (counts[bu] ?? 0) + 1
     })
-    return Object.entries(counts)
-      .sort((a, b) => b[1] - a[1])
-      .map(([value, count]) => ({ value, count }))
+    return Object.entries(counts).sort((a, b) => b[1] - a[1]).map(([value, count]) => ({ value, count }))
   }, [data])
 
   const statusOptions = useMemo(() => {
@@ -288,9 +388,7 @@ export default function DashboardPage() {
       const s = t.status || 'ไม่ระบุ'
       counts[s] = (counts[s] ?? 0) + 1
     })
-    return Object.entries(counts)
-      .sort((a, b) => b[1] - a[1])
-      .map(([value, count]) => ({ value, count }))
+    return Object.entries(counts).sort((a, b) => b[1] - a[1]).map(([value, count]) => ({ value, count }))
   }, [data])
 
   const systemOptions = useMemo(() => {
@@ -300,9 +398,7 @@ export default function DashboardPage() {
       const s = t.system || 'ไม่ระบุ'
       counts[s] = (counts[s] ?? 0) + 1
     })
-    return Object.entries(counts)
-      .sort((a, b) => b[1] - a[1])
-      .map(([value, count]) => ({ value, count }))
+    return Object.entries(counts).sort((a, b) => b[1] - a[1]).map(([value, count]) => ({ value, count }))
   }, [data])
 
   const filteredTickets = useMemo(() => {
@@ -323,6 +419,7 @@ export default function DashboardPage() {
   }, [data, search, buFilter, statusFilter, systemFilter])
 
   const activeFilterCount = buFilter.length + statusFilter.length + systemFilter.length
+  const hasActiveFilterOrSearch = activeFilterCount > 0 || search.trim().length > 0
 
   const clearAllFilters = () => {
     setBuFilter([])
@@ -547,6 +644,9 @@ export default function DashboardPage() {
               ))}
             </div>
           )}
+
+          {/* Filtered Insights mini-dashboard — only shows when filters/search active */}
+          {hasActiveFilterOrSearch && <FilteredInsights tickets={filteredTickets} />}
 
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
