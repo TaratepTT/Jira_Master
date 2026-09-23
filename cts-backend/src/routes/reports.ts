@@ -93,10 +93,11 @@ router.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
       row['เคสเดี่ยว'] = standalone
 
       for (const cat of recurringCats) {
-        row[cat] = tickets
-          .filter((t) => t.businessUnit === bu && t.recurringCategory === cat)
-          .map((t) => t.key)
-      }
+  if (!cat) continue   // ← เพิ่มบรรทัดนี้
+  row[cat] = tickets
+    .filter((t) => t.businessUnit === bu && t.recurringCategory === cat)
+    .map((t) => t.key)
+}
       return row
     })
 
