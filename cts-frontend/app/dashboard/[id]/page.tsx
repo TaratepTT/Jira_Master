@@ -41,7 +41,7 @@ interface ReportData {
   aggregations: Aggregations
 }
 
-type SortKey = 'key' | 'summary' | 'businessUnit' | 'status' | 'rootCause' | 'resolution' | 'deployDate'
+type SortKey = 'key' | 'summary' | 'businessUnit' | 'status' | 'rootCause' | 'resolution' | 'typeOfIssue'| 'deployDate'
 type SortDir = 'asc' | 'desc'
 
 // ── Helpers ───────────────────────────────────────────────────
@@ -740,6 +740,7 @@ export default function DashboardPage() {
                   <SortableHeader label="Status"     sortKey="status"       activeKey={sortKey} dir={sortDir} onSort={handleSort} />
                   <SortableHeader label="Root Cause" sortKey="rootCause"    activeKey={sortKey} dir={sortDir} onSort={handleSort} />
                   <SortableHeader label="Resolution" sortKey="resolution"   activeKey={sortKey} dir={sortDir} onSort={handleSort} />
+                  <SortableHeader label="Category"   sortKey="typeOfIssue"  activeKey={sortKey} dir={sortDir} onSort={handleSort} />
                   <SortableHeader label="Deploy"     sortKey="deployDate"   activeKey={sortKey} dir={sortDir} onSort={handleSort} />
                 </tr>
               </thead>
@@ -756,6 +757,7 @@ export default function DashboardPage() {
                     <td className="py-2 px-3">
                       <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium whitespace-nowrap ${statusBadge(t.status)}`}>{t.status}</span>
                     </td>
+                    <td className="py-2 px-3 text-slate-600 dark:text-slate-300 max-w-[140px] truncate">{t.typeOfIssue || <span className="text-slate-300 dark:text-slate-600">—</span>}</td>
                     <td className="py-2 px-3 text-slate-600 dark:text-slate-300 max-w-[180px] truncate">{t.rootCause || <span className="text-slate-300 dark:text-slate-600">—</span>}</td>
                     <td className="py-2 px-3 text-slate-600 dark:text-slate-300 max-w-[180px] truncate">{t.resolution || <span className="text-slate-300 dark:text-slate-600">—</span>}</td>
                     <td className="py-2 px-3 whitespace-nowrap">
@@ -772,6 +774,14 @@ export default function DashboardPage() {
                     </td>
                   </tr>
                 ))}
+                {!filteredTickets.length && (
+                  <tr><td colSpan={8} className="py-8 text-center text-slate-400 text-sm">
+                    ไม่พบข้อมูลที่ตรงกับตัวกรอง
+                    {activeFilterCount > 0 && (
+                      <button onClick={clearAllFilters} className="ml-2 text-blue-600 dark:text-blue-400 hover:underline">ล้างตัวกรอง</button>
+                    )}
+                  </td></tr>
+                )}
                 {!filteredTickets.length && (
                   <tr><td colSpan={7} className="py-8 text-center text-slate-400 text-sm">
                     ไม่พบข้อมูลที่ตรงกับตัวกรอง
