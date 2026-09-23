@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import api from '@/lib/api'
@@ -71,6 +71,89 @@ function ProgressBar({ label, count, total, color = 'bg-blue-500' }: { label: st
   )
 }
 
+// ── Multi-select dropdown ──────────────────────────────────────
+interface MultiSelectProps {
+  label: string
+  options: { value: string; count: number }[]
+  selected: string[]
+  onChange: (vals: string[]) => void
+}
+function MultiSelectFilter({ label, options, selected, onChange }: MultiSelectProps) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const onClickOutside = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', onClickOutside)
+    return () => document.removeEventListener('mousedown', onClickOutside)
+  }, [])
+
+  const toggle = (val: string) => {
+    if (selected.includes(val)) onChange(selected.filter(v => v !== val))
+    else onChange([...selected, val])
+  }
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        onClick={() => setOpen(o => !o)}
+        className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
+          selected.length
+            ? 'border-blue-300 bg-blue-50 text-blue-700'
+            : 'border-slate-300 bg-white text-slate-600 hover:bg-slate-50'
+        }`}
+      >
+        {label}
+        {selected.length > 0 && (
+          <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-blue-600 px-1 text-[10px] font-semibold text-white">
+            {selected.length}
+          </span>
+        )}
+        <svg className={`h-3 w-3 transition-transform ${open ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+        </svg>
+      </button>
+
+      {open && (
+        <div className="absolute z-20 mt-1.5 w-64 rounded-xl border border-slate-200 bg-white p-2 shadow-lg">
+          {selected.length > 0 && (
+            <button
+              onClick={() => onChange([])}
+              className="mb-1 w-full rounded-lg px-2 py-1.5 text-left text-xs text-blue-600 hover:bg-blue-50 transition-colors"
+            >
+              ล้างตัวกรองทั้งหมด
+            </button>
+          )}
+          <div className="max-h-64 overflow-y-auto">
+            {options.map(opt => (
+              <label
+                key={opt.value}
+                className="flex items-center justify-between gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50 cursor-pointer transition-colors"
+              >
+                <span className="flex items-center gap-2 min-w-0">
+                  <input
+                    type="checkbox"
+                    checked={selected.includes(opt.value)}
+                    onChange={() => toggle(opt.value)}
+                    className="h-3.5 w-3.5 rounded border-slate-300 text-blue-600 focus:ring-blue-500 flex-shrink-0"
+                  />
+                  <span className="text-xs text-slate-700 truncate">{opt.value}</span>
+                </span>
+                <span className="text-xs text-slate-400 flex-shrink-0">{opt.count}</span>
+              </label>
+            ))}
+            {!options.length && (
+              <p className="px-2 py-3 text-xs text-slate-400 text-center">ไม่มีตัวเลือก</p>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── Ticket Detail Modal ──────────────────────────────────────
 function TicketDetailModal({ ticket, onClose }: { ticket: TicketDetail; onClose: () => void }) {
   return (
@@ -136,7 +219,6 @@ function TicketDetailModal({ ticket, onClose }: { ticket: TicketDetail; onClose:
             </div>
           </div>
 
-          {/* Root Cause */}
           <div className="rounded-xl bg-red-50 border border-red-100 p-4">
             <p className="text-xs font-semibold text-red-700 mb-1.5 flex items-center gap-1.5">
               <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -149,7 +231,6 @@ function TicketDetailModal({ ticket, onClose }: { ticket: TicketDetail; onClose:
             </p>
           </div>
 
-          {/* Resolution */}
           <div className="rounded-xl bg-green-50 border border-green-100 p-4">
             <p className="text-xs font-semibold text-green-700 mb-1.5 flex items-center gap-1.5">
               <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -175,12 +256,80 @@ export default function DashboardPage() {
   const [selectedTicket, setSelectedTicket] = useState<TicketDetail | null>(null)
   const [search, setSearch] = useState('')
 
+  // ── Filter state ──────────────────────────────────────────
+  const [buFilter, setBuFilter]         = useState<string[]>([])
+  const [statusFilter, setStatusFilter] = useState<string[]>([])
+  const [systemFilter, setSystemFilter] = useState<string[]>([])
+
   useEffect(() => {
     if (!id) return
     api.get(`/api/reports/${id}`)
       .then(r => setData(r.data))
       .catch(e => setError(e?.response?.data?.message ?? 'โหลด report ไม่สำเร็จ'))
   }, [id])
+
+  // ── Filter options derived from tickets (must run before any early return) ──
+  const buOptions = useMemo(() => {
+    if (!data) return []
+    const counts: Record<string, number> = {}
+    data.tickets.forEach(t => {
+      const bu = t.businessUnit || 'ไม่ระบุ'
+      counts[bu] = (counts[bu] ?? 0) + 1
+    })
+    return Object.entries(counts)
+      .sort((a, b) => b[1] - a[1])
+      .map(([value, count]) => ({ value, count }))
+  }, [data])
+
+  const statusOptions = useMemo(() => {
+    if (!data) return []
+    const counts: Record<string, number> = {}
+    data.tickets.forEach(t => {
+      const s = t.status || 'ไม่ระบุ'
+      counts[s] = (counts[s] ?? 0) + 1
+    })
+    return Object.entries(counts)
+      .sort((a, b) => b[1] - a[1])
+      .map(([value, count]) => ({ value, count }))
+  }, [data])
+
+  const systemOptions = useMemo(() => {
+    if (!data) return []
+    const counts: Record<string, number> = {}
+    data.tickets.forEach(t => {
+      const s = t.system || 'ไม่ระบุ'
+      counts[s] = (counts[s] ?? 0) + 1
+    })
+    return Object.entries(counts)
+      .sort((a, b) => b[1] - a[1])
+      .map(([value, count]) => ({ value, count }))
+  }, [data])
+
+  const filteredTickets = useMemo(() => {
+    if (!data) return []
+    return data.tickets.filter(t => {
+      const matchSearch =
+        !search ||
+        t.key.toLowerCase().includes(search.toLowerCase()) ||
+        (t.summary ?? '').toLowerCase().includes(search.toLowerCase()) ||
+        (t.rootCause ?? '').toLowerCase().includes(search.toLowerCase())
+
+      const matchBu     = !buFilter.length     || buFilter.includes(t.businessUnit || 'ไม่ระบุ')
+      const matchStatus = !statusFilter.length || statusFilter.includes(t.status || 'ไม่ระบุ')
+      const matchSystem = !systemFilter.length || systemFilter.includes(t.system || 'ไม่ระบุ')
+
+      return matchSearch && matchBu && matchStatus && matchSystem
+    })
+  }, [data, search, buFilter, statusFilter, systemFilter])
+
+  const activeFilterCount = buFilter.length + statusFilter.length + systemFilter.length
+
+  const clearAllFilters = () => {
+    setBuFilter([])
+    setStatusFilter([])
+    setSystemFilter([])
+    setSearch('')
+  }
 
   if (error) return (
     <div className="min-h-screen bg-slate-50 flex items-center justify-center">
@@ -199,20 +348,13 @@ export default function DashboardPage() {
     </div>
   )
 
-  const { aggregations: ag, totalTickets, name, createdAt, tickets } = data
+  const { aggregations: ag, totalTickets, name, createdAt } = data
   const closedN = ag.statusCount['Closed'] ?? 0
   const l3N = ag.l3Tickets.length
   const systemEntries = Object.entries(ag.systemCount).sort((a,b) => b[1]-a[1])
   const statusEntries = Object.entries(ag.statusCount).sort((a,b) => b[1]-a[1])
   const buEntries = Object.entries(ag.buCount).sort((a,b) => b[1]-a[1])
   const catEntries = Object.entries(ag.issueTypeCount).sort((a,b) => b[1]-a[1])
-
-  const filteredTickets = tickets.filter(t =>
-    !search ||
-    t.key.toLowerCase().includes(search.toLowerCase()) ||
-    (t.summary ?? '').toLowerCase().includes(search.toLowerCase()) ||
-    (t.rootCause ?? '').toLowerCase().includes(search.toLowerCase())
-  )
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -341,9 +483,9 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* Issue Detail — Root Cause & Resolution & Deploy */}
+        {/* Issue Detail — Root Cause & Resolution & Deploy — with filters */}
         <div className="rounded-2xl bg-white border border-slate-200 p-5">
-          <div className="flex items-center justify-between mb-4 gap-3 flex-wrap">
+          <div className="flex items-center justify-between mb-3 gap-3 flex-wrap">
             <h2 className="text-sm font-semibold text-slate-700">Issue Detail — Root Cause, Resolution & Deploy</h2>
             <input
               type="text"
@@ -353,12 +495,66 @@ export default function DashboardPage() {
               className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition-colors w-64"
             />
           </div>
+
+          {/* Filter bar */}
+          <div className="flex items-center gap-2 flex-wrap mb-4 pb-4 border-b border-slate-100">
+            <span className="text-xs font-medium text-slate-400 mr-1">ตัวกรอง:</span>
+            <MultiSelectFilter label="Business Unit" options={buOptions} selected={buFilter} onChange={setBuFilter} />
+            <MultiSelectFilter label="Status" options={statusOptions} selected={statusFilter} onChange={setStatusFilter} />
+            <MultiSelectFilter label="System" options={systemOptions} selected={systemFilter} onChange={setSystemFilter} />
+            {activeFilterCount > 0 && (
+              <button
+                onClick={clearAllFilters}
+                className="flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-medium text-red-500 hover:bg-red-50 transition-colors"
+              >
+                <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+                ล้างตัวกรอง ({activeFilterCount})
+              </button>
+            )}
+            <span className="ml-auto text-xs text-slate-400">
+              แสดง {filteredTickets.length} จาก {totalTickets} tickets
+            </span>
+          </div>
+
+          {/* Active filter chips */}
+          {(buFilter.length > 0 || statusFilter.length > 0 || systemFilter.length > 0) && (
+            <div className="flex flex-wrap gap-1.5 mb-4">
+              {buFilter.map(v => (
+                <span key={`bu-${v}`} className="flex items-center gap-1 rounded-full bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-700">
+                  BU: {v}
+                  <button onClick={() => setBuFilter(buFilter.filter(x => x !== v))} className="hover:text-blue-900">
+                    <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                  </button>
+                </span>
+              ))}
+              {statusFilter.map(v => (
+                <span key={`st-${v}`} className="flex items-center gap-1 rounded-full bg-orange-50 px-2.5 py-1 text-xs font-medium text-orange-700">
+                  Status: {v}
+                  <button onClick={() => setStatusFilter(statusFilter.filter(x => x !== v))} className="hover:text-orange-900">
+                    <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                  </button>
+                </span>
+              ))}
+              {systemFilter.map(v => (
+                <span key={`sys-${v}`} className="flex items-center gap-1 rounded-full bg-teal-50 px-2.5 py-1 text-xs font-medium text-teal-700">
+                  System: {v}
+                  <button onClick={() => setSystemFilter(systemFilter.filter(x => x !== v))} className="hover:text-teal-900">
+                    <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
+
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-slate-200">
                   <th className="text-left py-2 px-3 text-xs font-medium text-slate-500">Key</th>
                   <th className="text-left py-2 px-3 text-xs font-medium text-slate-500">Summary</th>
+                  <th className="text-left py-2 px-3 text-xs font-medium text-slate-500">BU</th>
                   <th className="text-left py-2 px-3 text-xs font-medium text-slate-500">Status</th>
                   <th className="text-left py-2 px-3 text-xs font-medium text-slate-500">Root Cause</th>
                   <th className="text-left py-2 px-3 text-xs font-medium text-slate-500">Resolution</th>
@@ -373,12 +569,13 @@ export default function DashboardPage() {
                     className="border-b border-slate-100 hover:bg-blue-50 cursor-pointer transition-colors"
                   >
                     <td className="py-2 px-3 font-medium text-blue-600 whitespace-nowrap">{t.key}</td>
-                    <td className="py-2 px-3 text-slate-700 max-w-[180px] truncate">{t.summary || '—'}</td>
+                    <td className="py-2 px-3 text-slate-700 max-w-[160px] truncate">{t.summary || '—'}</td>
+                    <td className="py-2 px-3 text-slate-600 max-w-[120px] truncate">{t.businessUnit || '—'}</td>
                     <td className="py-2 px-3">
                       <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium whitespace-nowrap ${statusBadge(t.status)}`}>{t.status}</span>
                     </td>
-                    <td className="py-2 px-3 text-slate-600 max-w-[200px] truncate">{t.rootCause || <span className="text-slate-300">—</span>}</td>
-                    <td className="py-2 px-3 text-slate-600 max-w-[200px] truncate">{t.resolution || <span className="text-slate-300">—</span>}</td>
+                    <td className="py-2 px-3 text-slate-600 max-w-[180px] truncate">{t.rootCause || <span className="text-slate-300">—</span>}</td>
+                    <td className="py-2 px-3 text-slate-600 max-w-[180px] truncate">{t.resolution || <span className="text-slate-300">—</span>}</td>
                     <td className="py-2 px-3 whitespace-nowrap">
                       {t.deployDate ? (
                         <span className="inline-flex items-center gap-1 text-xs font-medium text-indigo-600">
@@ -394,7 +591,12 @@ export default function DashboardPage() {
                   </tr>
                 ))}
                 {!filteredTickets.length && (
-                  <tr><td colSpan={6} className="py-6 text-center text-slate-400 text-sm">ไม่พบข้อมูลที่ตรงกับการค้นหา</td></tr>
+                  <tr><td colSpan={7} className="py-8 text-center text-slate-400 text-sm">
+                    ไม่พบข้อมูลที่ตรงกับตัวกรอง
+                    {activeFilterCount > 0 && (
+                      <button onClick={clearAllFilters} className="ml-2 text-blue-600 hover:underline">ล้างตัวกรอง</button>
+                    )}
+                  </td></tr>
                 )}
               </tbody>
             </table>
