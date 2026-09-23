@@ -6,7 +6,7 @@ import Link from 'next/link'
 import api from '@/lib/api'
 import ThemeToggle from '@/components/theme/ThemeToggle'
 import ExpandableKeys from '@/components/dashboard/ExpandableKeys'
-
+import LogoutButton from '@/components/auth/LogoutButton'
 
 // ── Types ─────────────────────────────────────────────────────
 interface FreqRow { rank: number; category: string; count: number; pct: string; keys: string[] }
@@ -548,6 +548,7 @@ export default function DashboardPage() {
           </div>
           <div className="flex items-center gap-2">
             <ThemeToggle />
+            <LogoutButton />
             <a href={`${process.env.NEXT_PUBLIC_API_URL}/api/export/${id}`}
               className="flex items-center gap-1.5 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-1.5 text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors">
               <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3"/></svg>

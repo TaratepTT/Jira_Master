@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import api from '@/lib/api'
 import ThemeToggle from '@/components/theme/ThemeToggle'
+import LogoutButton from '@/components/auth/LogoutButton'
 
 type TestState =
   | { state: 'idle' }
@@ -96,6 +97,7 @@ export default function JiraSyncPage() {
               </div>
             )}
             <ThemeToggle />
+            <LogoutButton />
           </div>
         </div>
       </header>

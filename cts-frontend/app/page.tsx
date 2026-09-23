@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { getReports, deleteReport } from '@/lib/api'
 import ThemeToggle from '@/components/theme/ThemeToggle'
+import LogoutButton from '@/components/auth/LogoutButton'
 
 interface Report {
   id: string
@@ -64,6 +65,7 @@ export default function HomePage() {
           </div>
           <div className="flex items-center gap-3">
             <ThemeToggle />
+            <LogoutButton />
             <Link
               href="/upload"
               className="text-xs text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300 transition-colors"

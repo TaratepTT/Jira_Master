@@ -1,10 +1,35 @@
 import axios from 'axios'
 import type { UploadResponse } from '@/types/ticket'
 
+const TOKEN_KEY = 'cts-auth-token'
+
 const api = axios.create({
   baseURL: process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000',
   timeout: 60_000,
 })
+
+// ── Attach auth token to every request ──────────────────────────
+api.interceptors.request.use((config) => {
+  if (typeof window !== 'undefined') {
+    const token = localStorage.getItem(TOKEN_KEY)
+    if (token) config.headers.Authorization = `Bearer ${token}`
+  }
+  return config
+})
+
+// ── On 401, clear token and redirect to login ──────────────────
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error?.response?.status === 401 && typeof window !== 'undefined') {
+      localStorage.removeItem(TOKEN_KEY)
+      if (window.location.pathname !== '/login') {
+        window.location.href = '/login'
+      }
+    }
+    return Promise.reject(error)
+  }
+)
 
 // ── Upload file ───────────────────────────────────────────────
 export async function uploadReport(

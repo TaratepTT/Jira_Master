@@ -9,7 +9,7 @@ import UploadSuccess from '@/components/upload/UploadSuccess'
 import UploadError from '@/components/upload/UploadError'
 import RecentReports from '@/components/upload/RecentReports'
 import ThemeToggle from '@/components/theme/ThemeToggle'
-
+import LogoutButton from '@/components/auth/LogoutButton'
 import { uploadReport } from '@/lib/api'
 import type { UploadStatus } from '@/types/ticket'
 
@@ -190,6 +190,7 @@ export default function UploadPage() {
 
           <div className="flex items-center gap-3">
             <ThemeToggle />
+            <LogoutButton />
             <Link
               href="/jira"
               className="flex items-center gap-1.5 text-sm font-medium text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 transition-colors"

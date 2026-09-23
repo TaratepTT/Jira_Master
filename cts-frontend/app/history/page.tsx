@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { getReports, deleteReport } from '@/lib/api'
 import ThemeToggle from '@/components/theme/ThemeToggle'
+import LogoutButton from '@/components/auth/LogoutButton'
 
 interface Report { id: string; name: string; totalTickets: number; createdAt: string }
 
@@ -35,6 +36,7 @@ export default function HistoryPage() {
             <h1 className="text-sm font-semibold text-slate-800 dark:text-slate-100">ประวัติ Report ทั้งหมด</h1>
           </div>
           <ThemeToggle />
+          <LogoutButton />
         </div>
       </header>
       <main className="mx-auto max-w-4xl px-4 sm:px-6 py-8">

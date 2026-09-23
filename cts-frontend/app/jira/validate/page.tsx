@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import api from '@/lib/api'
 import ThemeToggle from '@/components/theme/ThemeToggle'
+import LogoutButton from '@/components/auth/LogoutButton'
 
 interface PreviewTicket {
   key: string
@@ -297,6 +298,7 @@ function ValidateScreenInner() {
             </div>
           </div>
           <ThemeToggle />
+          <LogoutButton />
         </div>
       </header>
 
