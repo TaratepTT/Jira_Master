@@ -5,18 +5,11 @@ import prisma from '../lib/prisma.js'
 
 const router = Router()
 
-/**
- * POST /api/upload
- * Body: multipart/form-data
- *   file        — CSV or Excel file
- *   reportName  — display name for this report
- */
 router.post(
   '/',
   upload.single('file'),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      // ── Validate ──────────────────────────────────────────
       if (!req.file) {
         res.status(400).json({ message: 'ไม่พบไฟล์ในคำขอ' })
         return
@@ -25,7 +18,6 @@ router.post(
       const reportName = (req.body.reportName as string | undefined)?.trim()
         || `Report ${new Date().toISOString().slice(0, 10)}`
 
-      // ── Parse ─────────────────────────────────────────────
       const { tickets, totalTickets } = parseFile(
         req.file.buffer,
         req.file.mimetype,
@@ -37,7 +29,6 @@ router.post(
         return
       }
 
-      // ── Persist ───────────────────────────────────────────
       const report = await prisma.report.create({
         data: {
           name: reportName,
@@ -53,6 +44,9 @@ router.post(
                 recurringCategory:  t.recurringCategory,
                 standaloneCategory: t.standaloneCategory,
                 summary:            t.summary || null,
+                rootCause:          t.rootCause || null,
+                resolution:         t.resolution || null,
+                deployDate:         t.deployDate || null,
               })),
             },
           },

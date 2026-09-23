@@ -1,16 +1,19 @@
-﻿import Papa from 'papaparse'
+import Papa from 'papaparse'
 import * as XLSX from 'xlsx'
 import type { RawTicketRow, Ticket, ParsedReport } from '../types/index.js'
 
 const COL_MAP: Record<keyof Ticket, string[]> = {
-  key:               ['key', 'issue key', 'id', 'ticket id', 'issue id'],
-  system:            ['issue type', 'system', 'project', 'component'],
-  status:            ['status', 'state'],
-  businessUnit:      ['business unit', 'bu', 'customer', 'organization', 'team'],
-  typeOfIssue:       ['type of issue', 'ticket type'],
-  recurringCategory: ['issue category', 'recurring issue category', 'recurring category', 'sub category'],
-  standaloneCategory:['type of system', 'standalone category', 'standalone sub category'],
-  summary:           ['summary', 'title', 'description', 'subject'],
+  key:                ['key', 'issue key', 'id', 'ticket id', 'issue id'],
+  system:             ['issue type', 'system', 'project', 'component'],
+  status:             ['status', 'state'],
+  businessUnit:       ['business unit', 'bu', 'customer', 'organization', 'team'],
+  typeOfIssue:        ['type of issue', 'ticket type'],
+  recurringCategory:  ['issue category', 'recurring issue category', 'recurring category', 'sub category'],
+  standaloneCategory: ['type of system', 'standalone category', 'standalone sub category'],
+  summary:            ['summary', 'title', 'description', 'subject'],
+  rootCause:          ['root cause', 'rootcause'],
+  resolution:         ['resolution'],
+  deployDate:         ['deploy', 'deploy date', 'deployed date', 'deployment date'],
 }
 
 function getCol(row: RawTicketRow, aliases: string[]): string {
@@ -42,6 +45,9 @@ function rowToTicket(row: RawTicketRow, idx: number): Ticket {
     recurringCategory:  getCol(row, COL_MAP.recurringCategory),
     standaloneCategory: getCol(row, COL_MAP.standaloneCategory),
     summary:            getCol(row, COL_MAP.summary),
+    rootCause:          getCol(row, COL_MAP.rootCause),
+    resolution:         getCol(row, COL_MAP.resolution),
+    deployDate:         getCol(row, COL_MAP.deployDate),
   }
 }
 
@@ -55,18 +61,17 @@ function parseCSVBuffer(buf: Buffer): RawTicketRow[] {
 }
 
 function findHeaderRow(ws: XLSX.WorkSheet): number {
-  // Scan first 10 rows to find the one containing 'Key' or 'Issue Key'
   const KEY_VARIANTS = ['key', 'issue key']
   for (let r = 0; r < 10; r++) {
     for (let c = 0; c < 20; c++) {
       const addr = XLSX.utils.encode_cell({ r, c })
       const cell = ws[addr]
       if (cell && KEY_VARIANTS.includes(String(cell.v ?? '').trim().toLowerCase())) {
-        return r // 0-based row index of the header
+        return r
       }
     }
   }
-  return 0 // fallback: first row
+  return 0
 }
 
 function parseExcelBuffer(buf: Buffer): RawTicketRow[] {
@@ -74,8 +79,6 @@ function parseExcelBuffer(buf: Buffer): RawTicketRow[] {
   const ws = wb.Sheets[wb.SheetNames[0]]
 
   const headerRow = findHeaderRow(ws)
-
-  // Re-read sheet starting from the found header row
   const range = XLSX.utils.decode_range(ws['!ref'] ?? 'A1')
   range.s.r = headerRow
   const trimmedRef = XLSX.utils.encode_range(range)

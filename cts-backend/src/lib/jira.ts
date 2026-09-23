@@ -29,6 +29,7 @@ const FIELDS = [
   'customfield_10053', // Resolution (custom)
   'customfield_10169', // Type of Issue
   'customfield_10168', // Type of System
+  'customfield_10185', // Deployed Date
 ]
 
 // ── Types ─────────────────────────────────────────────────────
@@ -47,9 +48,9 @@ export interface JiraIssue {
   resolution:    string
   typeOfIssue:   string
   typeOfSystem:  string
+  deployDate:    string
 }
 
-// ── Extract plain text from Atlassian Document Format (ADF) ──
 function extractAdf(v: unknown): string {
   if (!v) return ''
   if (typeof v === 'string') return v
@@ -63,7 +64,6 @@ function extractAdf(v: unknown): string {
   } catch { return '' }
 }
 
-// ── Extract string value from various Jira field shapes ──────
 function str(v: unknown): string {
   if (!v) return ''
   if (typeof v === 'string') return v
@@ -74,7 +74,6 @@ function str(v: unknown): string {
   return String(v)
 }
 
-// ── Map raw Jira issue → our shape ───────────────────────────
 function mapIssue(raw: Record<string, unknown>): JiraIssue {
   const f = raw.fields as Record<string, unknown>
   return {
@@ -92,12 +91,12 @@ function mapIssue(raw: Record<string, unknown>): JiraIssue {
     resolution:    extractAdf(f.customfield_10053),
     typeOfIssue:   str(f.customfield_10169),
     typeOfSystem:  str(f.customfield_10168),
+    deployDate:    str(f.customfield_10185),
   }
 }
 
 // ── Fetch issues via new Jira Cloud /search/jql endpoint ─────
-// NOTE: This endpoint uses nextPageToken pagination, NOT startAt.
-// See: https://developer.atlassian.com/cloud/jira/platform/changelog/#CHANGE-2046
+// Uses nextPageToken pagination (NOT startAt — deprecated).
 export async function fetchJiraIssues(
   jql: string,
   maxTotal = 500

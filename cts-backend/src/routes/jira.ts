@@ -5,7 +5,6 @@ import prisma from '../lib/prisma.js'
 const router = Router()
 
 // ── GET /api/jira/test ────────────────────────────────────────
-// Test Jira connection
 router.get('/test', async (_req: Request, res: Response, next: NextFunction) => {
   try {
     const result = await testJiraConnection()
@@ -16,8 +15,6 @@ router.get('/test', async (_req: Request, res: Response, next: NextFunction) => 
 })
 
 // ── POST /api/jira/sync ───────────────────────────────────────
-// Sync Jira tickets → Supabase
-// Body: { jql, reportName }
 router.post('/sync', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const {
@@ -25,7 +22,6 @@ router.post('/sync', async (req: Request, res: Response, next: NextFunction) => 
       reportName = `Jira Sync — ${new Date().toISOString().slice(0, 10)}`,
     } = req.body as { jql?: string; reportName?: string }
 
-    // 1. Fetch from Jira
     const issues = await fetchJiraIssues(jql, 500)
 
     if (!issues.length) {
@@ -33,7 +29,6 @@ router.post('/sync', async (req: Request, res: Response, next: NextFunction) => 
       return
     }
 
-    // 2. Normalise system name (same as parser.ts)
     const normaliseSystem = (raw: string) => {
       const u = raw.toUpperCase()
       if (u.includes('CMP')) return 'CMP'
@@ -42,7 +37,6 @@ router.post('/sync', async (req: Request, res: Response, next: NextFunction) => 
       return raw
     }
 
-    // 3. Save to DB
     const report = await prisma.report.create({
       data: {
         name: reportName,
@@ -58,6 +52,9 @@ router.post('/sync', async (req: Request, res: Response, next: NextFunction) => 
               recurringCategory:  i.issueCategory,
               standaloneCategory: i.typeOfSystem,
               summary:            i.summary || null,
+              rootCause:          i.rootCause || null,
+              resolution:         i.resolution || null,
+              deployDate:         i.deployDate || null,
             })),
           },
         },
@@ -76,7 +73,6 @@ router.post('/sync', async (req: Request, res: Response, next: NextFunction) => 
 })
 
 // ── GET /api/jira/preview ─────────────────────────────────────
-// Preview tickets from Jira without saving (first 10)
 router.get('/preview', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const jql = (req.query.jql as string) || 'project = CTS ORDER BY created DESC'

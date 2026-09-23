@@ -11,6 +11,9 @@ export interface Ticket {
   recurringCategory: string
   standaloneCategory: string
   summary: string
+  rootCause: string
+  resolution: string
+  deployDate: string
 }
 
 export interface ParsedReport {

@@ -4,7 +4,6 @@ import prisma from '../lib/prisma.js'
 const router = Router()
 
 // ── GET /api/reports  ─────────────────────────────────────────
-// List all reports (newest first), no ticket data
 router.get('/', async (_req: Request, res: Response, next: NextFunction) => {
   try {
     const reports = await prisma.report.findMany({
@@ -24,7 +23,6 @@ router.get('/', async (_req: Request, res: Response, next: NextFunction) => {
 })
 
 // ── GET /api/reports/:id  ─────────────────────────────────────
-// Full report with tickets + pre-computed aggregations
 router.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { id } = req.params
@@ -41,24 +39,12 @@ router.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
 
     const tickets = report.tickets
 
-    // ── Aggregations (mirror what the frontend dashboard needs) ──
+    const systemCount     = groupCount(tickets, 'system')
+    const statusCount     = groupCount(tickets, 'status')
+    const buCount         = groupCount(tickets, 'businessUnit')
+    const issueTypeCount  = groupCount(tickets, 'typeOfIssue')
+    const recurringCount  = groupCount(tickets, 'recurringCategory')
 
-    // 1. System breakdown
-    const systemCount = groupCount(tickets, 'system')
-
-    // 2. Status breakdown
-    const statusCount = groupCount(tickets, 'status')
-
-    // 3. Business unit breakdown
-    const buCount = groupCount(tickets, 'businessUnit')
-
-    // 4. Type of issue breakdown
-    const issueTypeCount = groupCount(tickets, 'typeOfIssue')
-
-    // 5. Recurring category breakdown
-    const recurringCount = groupCount(tickets, 'recurringCategory')
-
-    // 6. Ticket frequency by category (ranked)
     const frequencyTable = Object.entries(issueTypeCount)
       .sort((a, b) => b[1] - a[1])
       .map(([category, count], idx) => ({
@@ -71,7 +57,6 @@ router.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
           .map((t) => t.key),
       }))
 
-    // 7. BU cross-table by recurring category
     const recurringCats = [
       ...new Set(
         tickets
@@ -93,15 +78,14 @@ router.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
       row['เคสเดี่ยว'] = standalone
 
       for (const cat of recurringCats) {
-  if (!cat) continue   // ← เพิ่มบรรทัดนี้
-  row[cat] = tickets
-    .filter((t) => t.businessUnit === bu && t.recurringCategory === cat)
-    .map((t) => t.key)
-}
+        if (!cat) continue
+        row[cat] = tickets
+          .filter((t) => t.businessUnit === bu && t.recurringCategory === cat)
+          .map((t) => t.key)
+      }
       return row
     })
 
-    // 8. BU by issue type matrix
     const issueTypes = Object.keys(issueTypeCount)
     const buIssueMatrix = buList.map((bu) => {
       const row: Record<string, string[] | string> = { bu }
@@ -113,7 +97,6 @@ router.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
       return row
     })
 
-    // 9. L3 escalation tickets (status contains 'L3' or 'investigate')
     const l3Tickets = tickets.filter(
       (t) =>
         t.status.toLowerCase().includes('l3') ||
@@ -126,7 +109,7 @@ router.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
       totalTickets: report.totalTickets,
       createdAt:    report.createdAt,
 
-      // raw tickets (paginated if needed later)
+      // raw tickets — includes rootCause, resolution, deployDate
       tickets: tickets.map((t) => ({
         key:                t.key,
         system:             t.system,
@@ -136,9 +119,11 @@ router.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
         recurringCategory:  t.recurringCategory,
         standaloneCategory: t.standaloneCategory,
         summary:            t.summary,
+        rootCause:          t.rootCause,
+        resolution:         t.resolution,
+        deployDate:         t.deployDate,
       })),
 
-      // aggregations
       aggregations: {
         systemCount,
         statusCount,
@@ -149,13 +134,13 @@ router.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
         buRecurringMatrix,
         buIssueMatrix,
         l3Tickets: l3Tickets.map((t) => ({
-          key:    t.key,
-          bu:     t.businessUnit,
-          status: t.status,
+          key:     t.key,
+          bu:      t.businessUnit,
+          status:  t.status,
           summary: t.summary,
         })),
-        top5Bu:   Object.entries(buCount).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([name, count]) => ({ name, count })),
-        top3Cat:  frequencyTable.slice(0, 3),
+        top5Bu:  Object.entries(buCount).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([name, count]) => ({ name, count })),
+        top3Cat: frequencyTable.slice(0, 3),
       },
     })
   } catch (err) {
@@ -174,7 +159,6 @@ router.delete('/:id', async (req: Request, res: Response, next: NextFunction) =>
       return
     }
 
-    // Cascade delete tickets via Prisma relation
     await prisma.report.delete({ where: { id } })
 
     res.json({ message: 'ลบ report เรียบร้อย' })
@@ -183,7 +167,6 @@ router.delete('/:id', async (req: Request, res: Response, next: NextFunction) =>
   }
 })
 
-// ── Helpers ───────────────────────────────────────────────────
 function groupCount<T extends Record<string, unknown>>(
   items: T[],
   field: keyof T

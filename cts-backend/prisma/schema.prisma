@@ -28,9 +28,12 @@ model Ticket {
   status             String
   businessUnit       String  @map("business_unit")
   typeOfIssue        String  @map("type_of_issue")
-  recurringCategory  String?  @map("recurring_category")
-  standaloneCategory String?  @map("standalone_category")
+  recurringCategory  String? @map("recurring_category")
+  standaloneCategory String? @map("standalone_category")
   summary            String?
+  rootCause          String? @map("root_cause")
+  resolution         String? @map("resolution")
+  deployDate         String? @map("deploy_date")
 
   report Report @relation(fields: [reportId], references: [id], onDelete: Cascade)
 
