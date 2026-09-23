@@ -97,8 +97,11 @@ export async function fetchJiraIssues(
   const pageSize = 100
 
   while (issues.length < maxTotal) {
-    const { data } = await jiraClient.get('/search', {
-      params: { jql, fields: FIELDS, startAt, maxResults: pageSize },
+    const { data } = await jiraClient.post('/search', {
+      jql,
+      fields: FIELDS.split(','),
+      startAt,
+      maxResults: pageSize,
     })
 
     const page = (data.issues ?? []) as Record<string, unknown>[]
