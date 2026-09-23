@@ -3,14 +3,15 @@ import express from 'express'
 import cors from 'cors'
 import helmet from 'helmet'
 import morgan from 'morgan'
-import jiraRouter from './routes/jira.js'
 
-
-import uploadRouter from './routes/upload.js'
+import authRouter    from './routes/auth.js'
+import uploadRouter  from './routes/upload.js'
 import reportsRouter from './routes/reports.js'
-import exportRouter from './routes/export.js'
-import healthRouter from './routes/health.js'
+import exportRouter  from './routes/export.js'
+import healthRouter  from './routes/health.js'
+import jiraRouter    from './routes/jira.js'
 import { errorHandler } from './middleware/errorHandler.js'
+import { requireAuth } from './middleware/requireAuth.js'
 
 // ── App ───────────────────────────────────────────────────────
 const app = express()
@@ -27,7 +28,6 @@ const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS ?? 'http://localhost:3000')
 
 const corsOptions: cors.CorsOptions = {
   origin: (origin, cb) => {
-    // Allow requests with no origin (e.g. curl, Postman)
     if (!origin) return cb(null, true)
     if (ALLOWED_ORIGINS.includes(origin)) return cb(null, true)
     cb(new Error(`CORS: origin ${origin} not allowed`))
@@ -37,7 +37,6 @@ const corsOptions: cors.CorsOptions = {
   credentials: true,
 }
 
-// Handle preflight OPTIONS requests for all routes
 app.options('*', cors(corsOptions))
 app.use(cors(corsOptions))
 
@@ -45,12 +44,15 @@ app.use(cors(corsOptions))
 app.use(express.json({ limit: '1mb' }))
 app.use(express.urlencoded({ extended: true }))
 
-// ── Routes ────────────────────────────────────────────────────
-app.use('/api/health',  healthRouter)
-app.use('/api/upload',  uploadRouter)
-app.use('/api/reports', reportsRouter)
-app.use('/api/export',  exportRouter)
-app.use('/api/jira', jiraRouter)
+// ── Public routes (no auth required) ────────────────────────────
+app.use('/api/health', healthRouter)
+app.use('/api/auth',   authRouter)
+
+// ── Protected routes (auth required) ────────────────────────────
+app.use('/api/upload',  requireAuth, uploadRouter)
+app.use('/api/reports', requireAuth, reportsRouter)
+app.use('/api/export',  requireAuth, exportRouter)
+app.use('/api/jira',    requireAuth, jiraRouter)
 
 // ── 404 ───────────────────────────────────────────────────────
 app.use((_req, res) => {
