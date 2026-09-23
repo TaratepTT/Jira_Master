@@ -5,7 +5,7 @@ const JIRA_EMAIL    = process.env.JIRA_EMAIL ?? ''
 const JIRA_TOKEN    = process.env.JIRA_API_TOKEN ?? ''
 
 const jiraClient = axios.create({
-  baseURL: `${JIRA_BASE_URL}/rest/api/3`,
+  baseURL: `${JIRA_BASE_URL}/rest/api/2`,
   auth: { username: JIRA_EMAIL, password: JIRA_TOKEN },
   headers: {
     'Accept':       'application/json',
