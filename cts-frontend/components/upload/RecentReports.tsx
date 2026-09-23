@@ -46,7 +46,7 @@ export default function RecentReports() {
     return (
       <div className="space-y-2">
         {[1, 2, 3].map((i) => (
-          <div key={i} className="h-14 animate-pulse rounded-xl bg-slate-100" />
+          <div key={i} className="h-14 animate-pulse rounded-xl bg-slate-100 dark:bg-slate-800" />
         ))}
       </div>
     )
@@ -54,19 +54,19 @@ export default function RecentReports() {
 
   if (!reports.length) {
     return (
-      <p className="py-4 text-center text-sm text-slate-400">
+      <p className="py-4 text-center text-sm text-slate-400 dark:text-slate-500">
         ยังไม่มี report ที่ผ่านมา
       </p>
     )
   }
 
   return (
-    <ul className="divide-y divide-slate-100 rounded-xl border border-slate-200 bg-white overflow-hidden">
+    <ul className="divide-y divide-slate-100 dark:divide-slate-700 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 overflow-hidden">
       {reports.map((r) => (
-        <li key={r.id} className="flex items-center gap-3 px-4 py-3 hover:bg-slate-50 transition-colors">
+        <li key={r.id} className="flex items-center gap-3 px-4 py-3 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors">
           {/* Icon */}
-          <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-blue-50">
-            <svg className="h-4 w-4 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+          <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-blue-50 dark:bg-blue-900/40">
+            <svg className="h-4 w-4 text-blue-500 dark:text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
                 d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z" />
             </svg>
@@ -74,8 +74,8 @@ export default function RecentReports() {
 
           {/* Info */}
           <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-medium text-slate-700">{r.name}</p>
-            <p className="text-xs text-slate-400">
+            <p className="truncate text-sm font-medium text-slate-700 dark:text-slate-200">{r.name}</p>
+            <p className="text-xs text-slate-400 dark:text-slate-500">
               {r.totalTickets} tickets ·{' '}
               {new Date(r.createdAt).toLocaleDateString('th-TH', {
                 day: 'numeric', month: 'short', year: 'numeric',
@@ -87,7 +87,7 @@ export default function RecentReports() {
           <div className="flex items-center gap-1">
             <Link
               href={`/dashboard/${r.id}`}
-              className="rounded-lg px-3 py-1.5 text-xs font-medium text-blue-600 hover:bg-blue-50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+              className="rounded-lg px-3 py-1.5 text-xs font-medium text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
             >
               ดู
             </Link>
@@ -95,7 +95,7 @@ export default function RecentReports() {
               onClick={() => handleDelete(r.id)}
               disabled={deletingId === r.id}
               aria-label={`ลบ ${r.name}`}
-              className="rounded-lg p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-500 transition-colors disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500"
+              className="rounded-lg p-1.5 text-slate-400 dark:text-slate-500 hover:bg-red-50 dark:hover:bg-red-950/30 hover:text-red-500 dark:hover:text-red-400 transition-colors disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500"
             >
               {deletingId === r.id ? (
                 <svg className="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24" aria-hidden="true">
