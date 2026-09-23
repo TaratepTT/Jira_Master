@@ -5,6 +5,8 @@ import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import api from '@/lib/api'
 import ThemeToggle from '@/components/theme/ThemeToggle'
+import ExpandableKeys from '@/components/dashboard/ExpandableKeys'
+
 
 // ── Types ─────────────────────────────────────────────────────
 interface FreqRow { rank: number; category: string; count: number; pct: string; keys: string[] }
@@ -645,8 +647,9 @@ export default function DashboardPage() {
                     <td className="py-2 px-3 font-medium text-slate-700 dark:text-slate-200">{row.category}</td>
                     <td className="py-2 px-3 text-right dark:text-slate-300">{row.count}</td>
                     <td className="py-2 px-3 text-right text-slate-500 dark:text-slate-400">{row.pct}</td>
-                    <td className="py-2 px-3 text-xs text-blue-600 dark:text-blue-400 max-w-xs truncate">{row.keys.join(', ')}</td>
+                    <td className="py-2 px-3"><ExpandableKeys keys={row.keys} /></td>
                   </tr>
+                  
                 ))}
                 <tr className="bg-slate-50 dark:bg-slate-700/50 font-semibold">
                   <td className="py-2 px-3 dark:text-slate-200">-</td>
