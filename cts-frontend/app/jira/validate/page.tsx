@@ -33,6 +33,112 @@ type SaveState =
   | { state: 'error'; message: string }
 
 type ViewFilter = 'all' | 'valid' | 'invalid'
+type EditableField = 'summary' | 'businessUnit' | 'status' | 'typeOfIssue' | 'rootCause' | 'resolution'
+
+const REQUIRED_FIELDS: Array<{ key: EditableField | 'key' | 'system'; label: string }> = [
+  { key: 'key',          label: 'ไม่มี Key' },
+  { key: 'status',       label: 'ไม่มี Status' },
+  { key: 'businessUnit', label: 'ไม่มี Business Unit' },
+  { key: 'typeOfIssue',  label: 'ไม่มี Type of Issue' },
+  { key: 'system',       label: 'ไม่มี System' },
+]
+
+// Recompute validation problems for a single ticket after an inline edit
+function revalidate(t: PreviewTicket, allKeys: string[]): PreviewTicket {
+  const problems: string[] = []
+  if (!t.key) problems.push('ไม่มี Key')
+  if (!t.status) problems.push('ไม่มี Status')
+  if (!t.businessUnit) problems.push('ไม่มี Business Unit')
+  if (!t.typeOfIssue) problems.push('ไม่มี Type of Issue')
+  if (!t.system) problems.push('ไม่มี System')
+  const dupCount = allKeys.filter(k => k === t.key).length
+  if (dupCount > 1) problems.push('Key ซ้ำในชุดข้อมูลนี้')
+  return { ...t, problems, valid: problems.length === 0 }
+}
+
+// ── Inline editable text cell ──────────────────────────────────
+function EditableText({
+  value, onSave, placeholder, multiline,
+}: {
+  value: string
+  onSave: (v: string) => void
+  placeholder?: string
+  multiline?: boolean
+}) {
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState(value)
+
+  useEffect(() => { setDraft(value) }, [value])
+
+  const commit = () => {
+    setEditing(false)
+    if (draft !== value) onSave(draft)
+  }
+
+  if (editing) {
+    const Field = multiline ? 'textarea' : 'input'
+    return (
+      <Field
+        autoFocus
+        value={draft}
+        onChange={e => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={e => {
+          if (e.key === 'Enter' && !multiline) commit()
+          if (e.key === 'Escape') { setDraft(value); setEditing(false) }
+        }}
+        rows={multiline ? 2 : undefined}
+        className="w-full min-w-[140px] rounded border border-blue-400 bg-white dark:bg-slate-700 px-1.5 py-1 text-xs text-slate-800 dark:text-slate-100 outline-none resize-none"
+      />
+    )
+  }
+
+  return (
+    <button
+      onClick={() => setEditing(true)}
+      className="w-full text-left truncate hover:bg-blue-50 dark:hover:bg-blue-950/30 rounded px-1 py-0.5 -mx-1 transition-colors"
+      title={value || placeholder}
+    >
+      {value || <span className="text-red-400 dark:text-red-500 italic">{placeholder ?? 'ว่าง'}</span>}
+    </button>
+  )
+}
+
+// ── Inline editable dropdown cell ──────────────────────────────
+function EditableSelect({
+  value, options, onSave, placeholder,
+}: {
+  value: string
+  options: string[]
+  onSave: (v: string) => void
+  placeholder?: string
+}) {
+  const [editing, setEditing] = useState(false)
+
+  if (editing) {
+    return (
+      <select
+        autoFocus
+        value={value}
+        onChange={e => { onSave(e.target.value); setEditing(false) }}
+        onBlur={() => setEditing(false)}
+        className="w-full min-w-[120px] rounded border border-blue-400 bg-white dark:bg-slate-700 px-1.5 py-1 text-xs text-slate-800 dark:text-slate-100 outline-none"
+      >
+        <option value="">— เลือก —</option>
+        {options.map(o => <option key={o} value={o}>{o}</option>)}
+      </select>
+    )
+  }
+
+  return (
+    <button
+      onClick={() => setEditing(true)}
+      className="w-full text-left truncate hover:bg-blue-50 dark:hover:bg-blue-950/30 rounded px-1 py-0.5 -mx-1 transition-colors"
+    >
+      {value || <span className="text-red-400 dark:text-red-500 italic">{placeholder ?? 'ว่าง'}</span>}
+    </button>
+  )
+}
 
 function ValidateScreenInner() {
   const router = useRouter()
@@ -64,6 +170,27 @@ function ValidateScreenInner() {
         setLoadState({ state: 'error', message: msg })
       })
   }, [jql])
+
+  // ── Dropdown option pools, derived from the fetched data ──────
+  const statusOptions = useMemo(() => {
+    const set = new Set(tickets.map(t => t.status).filter(Boolean))
+    ;['Closed', 'Open', 'In Progress', 'L2-IN PROGRESS', 'L3-INVESTIGATE', 'Cancel', 'Waiting for customer'].forEach(s => set.add(s))
+    return Array.from(set).sort()
+  }, [tickets])
+
+  const typeOfIssueOptions = useMemo(() => {
+    const set = new Set(tickets.map(t => t.typeOfIssue).filter(Boolean))
+    ;['Non-app issue', 'User request', 'Human Error', 'Data Issue', 'Other'].forEach(s => set.add(s))
+    return Array.from(set).sort()
+  }, [tickets])
+
+  // ── Edit a single field on a single ticket ─────────────────────
+  const editField = (key: string, field: EditableField, value: string) => {
+    setTickets(prev => {
+      const allKeys = prev.map(t => t.key)
+      return prev.map(t => t.key === key ? revalidate({ ...t, [field]: value }, allKeys) : t)
+    })
+  }
 
   const validCount   = useMemo(() => tickets.filter(t => t.valid).length, [tickets])
   const invalidCount = tickets.length - validCount
@@ -159,7 +286,7 @@ function ValidateScreenInner() {
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-900 transition-colors">
       <header className="bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 sticky top-0 z-10">
-        <div className="mx-auto max-w-6xl px-4 sm:px-6 h-14 flex items-center justify-between">
+        <div className="mx-auto max-w-[1400px] px-4 sm:px-6 h-14 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <Link href="/jira" className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors">
               <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18"/></svg>
@@ -173,7 +300,7 @@ function ValidateScreenInner() {
         </div>
       </header>
 
-      <main className="mx-auto max-w-6xl px-4 sm:px-6 py-8 space-y-6">
+      <main className="mx-auto max-w-[1400px] px-4 sm:px-6 py-8 space-y-6">
 
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           <div className="rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 p-4">
@@ -197,7 +324,7 @@ function ValidateScreenInner() {
         {invalidCount > 0 && (
           <div className="rounded-xl border border-orange-200 dark:border-orange-900/50 bg-orange-50 dark:bg-orange-950/20 px-5 py-3 flex items-center justify-between gap-3 flex-wrap">
             <p className="text-sm text-orange-800 dark:text-orange-300">
-              <strong>{invalidCount} tickets</strong> มีข้อมูลไม่ครบ (เช่น ไม่มี Business Unit หรือ Status) — ระบบไม่ได้เลือกไว้ให้อัตโนมัติ ตรวจสอบก่อนรวมเข้ารายงาน
+              <strong>{invalidCount} tickets</strong> มีข้อมูลไม่ครบ — คลิกที่เซลล์เพื่อแก้ไขได้โดยตรง แล้วรายการจะย้ายไปกลุ่ม &quot;ผ่าน&quot; อัตโนมัติ
             </p>
             <button
               onClick={() => setViewFilter('invalid')}
@@ -241,19 +368,32 @@ function ValidateScreenInner() {
             <button onClick={deselectAllVisible} className="text-xs font-medium text-slate-500 dark:text-slate-400 hover:underline">ไม่เลือกที่แสดง</button>
             <span className="text-slate-300 dark:text-slate-600">·</span>
             <button onClick={selectOnlyValid} className="text-xs font-medium text-green-600 dark:text-green-400 hover:underline">เลือกเฉพาะที่ผ่าน validation</button>
+            <span className="ml-auto text-xs text-slate-400 italic">💡 คลิกที่เซลล์ใดก็ได้เพื่อแก้ไข</span>
           </div>
         </div>
 
         <div className="rounded-2xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 overflow-hidden">
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <table className="w-full text-sm table-fixed">
+              <colgroup>
+                <col className="w-10" />
+                <col className="w-24" />
+                <col className="w-52" />
+                <col className="w-32" />
+                <col className="w-32" />
+                <col className="w-44" />
+                <col className="w-44" />
+                <col className="w-28" />
+              </colgroup>
               <thead>
                 <tr className="border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/50">
-                  <th className="w-10 py-2.5 px-3"></th>
+                  <th className="py-2.5 px-3"></th>
                   <th className="text-left py-2.5 px-3 text-xs font-medium text-slate-500 dark:text-slate-400">Key</th>
                   <th className="text-left py-2.5 px-3 text-xs font-medium text-slate-500 dark:text-slate-400">Summary</th>
                   <th className="text-left py-2.5 px-3 text-xs font-medium text-slate-500 dark:text-slate-400">BU</th>
                   <th className="text-left py-2.5 px-3 text-xs font-medium text-slate-500 dark:text-slate-400">Status</th>
+                  <th className="text-left py-2.5 px-3 text-xs font-medium text-slate-500 dark:text-slate-400">Root Cause</th>
+                  <th className="text-left py-2.5 px-3 text-xs font-medium text-slate-500 dark:text-slate-400">Resolution</th>
                   <th className="text-left py-2.5 px-3 text-xs font-medium text-slate-500 dark:text-slate-400">ปัญหา</th>
                 </tr>
               </thead>
@@ -261,9 +401,9 @@ function ValidateScreenInner() {
                 {filteredTickets.map(t => (
                   <tr
                     key={t.key}
-                    className={`border-b border-slate-100 dark:border-slate-700/50 transition-colors ${
+                    className={`border-b border-slate-100 dark:border-slate-700/50 transition-colors align-top ${
                       !t.valid ? 'bg-orange-50/40 dark:bg-orange-950/10' : ''
-                    } hover:bg-blue-50 dark:hover:bg-blue-950/20`}
+                    }`}
                   >
                     <td className="py-2 px-3">
                       <input
@@ -274,12 +414,20 @@ function ValidateScreenInner() {
                       />
                     </td>
                     <td className="py-2 px-3 font-medium text-blue-600 dark:text-blue-400 whitespace-nowrap">{t.key}</td>
-                    <td className="py-2 px-3 text-slate-700 dark:text-slate-200 max-w-[220px] truncate">{t.summary || '—'}</td>
-                    <td className="py-2 px-3 text-slate-600 dark:text-slate-300 max-w-[140px] truncate">
-                      {t.businessUnit || <span className="text-red-400 dark:text-red-500 italic">ว่าง</span>}
+                    <td className="py-2 px-3 text-slate-700 dark:text-slate-200">
+                      <EditableText value={t.summary ?? ''} onSave={v => editField(t.key, 'summary', v)} placeholder="ไม่มี summary" />
                     </td>
-                    <td className="py-2 px-3 text-slate-600 dark:text-slate-300 whitespace-nowrap">
-                      {t.status || <span className="text-red-400 dark:text-red-500 italic">ว่าง</span>}
+                    <td className="py-2 px-3 text-slate-600 dark:text-slate-300">
+                      <EditableText value={t.businessUnit} onSave={v => editField(t.key, 'businessUnit', v)} placeholder="ไม่มี BU" />
+                    </td>
+                    <td className="py-2 px-3 text-slate-600 dark:text-slate-300">
+                      <EditableSelect value={t.status} options={statusOptions} onSave={v => editField(t.key, 'status', v)} />
+                    </td>
+                    <td className="py-2 px-3 text-slate-600 dark:text-slate-300">
+                      <EditableText value={t.rootCause ?? ''} onSave={v => editField(t.key, 'rootCause', v)} placeholder="ไม่มีข้อมูล" multiline />
+                    </td>
+                    <td className="py-2 px-3 text-slate-600 dark:text-slate-300">
+                      <EditableText value={t.resolution ?? ''} onSave={v => editField(t.key, 'resolution', v)} placeholder="ไม่มีข้อมูล" multiline />
                     </td>
                     <td className="py-2 px-3">
                       {t.problems.length > 0 ? (
@@ -300,7 +448,7 @@ function ValidateScreenInner() {
                   </tr>
                 ))}
                 {!filteredTickets.length && (
-                  <tr><td colSpan={6} className="py-10 text-center text-sm text-slate-400">ไม่พบข้อมูลที่ตรงกับตัวกรอง</td></tr>
+                  <tr><td colSpan={8} className="py-10 text-center text-sm text-slate-400">ไม่พบข้อมูลที่ตรงกับตัวกรอง</td></tr>
                 )}
               </tbody>
             </table>
@@ -343,7 +491,6 @@ function ValidateScreenInner() {
     </div>
   )
 }
-
 
 export default function ValidateScreen() {
   return (
