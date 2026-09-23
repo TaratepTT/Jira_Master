@@ -212,7 +212,7 @@ export default function UploadPage() {
             <div>
               <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-50">อัปโหลด Jira / CTS Export</h1>
               <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-                นำเข้าไฟล์ CSV หรือ Excel แล้วรับ dashboard พร้อม Executive Summary ทันที
+                นำเข้าไฟล์ CSV หรือ Excel เพื่อสร้าง Dashboard
               </p>
             </div>
 

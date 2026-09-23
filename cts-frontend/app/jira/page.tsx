@@ -84,7 +84,7 @@ export default function JiraSyncPage() {
         <div>
           <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-50">ดึงข้อมูลจาก Jira</h1>
           <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-            Sync tickets จาก <span className="font-mono text-slate-700 dark:text-slate-300">ascendcommerce-support.atlassian.net</span> — ขั้นตอนถัดไปจะให้ตรวจสอบข้อมูลก่อนสร้าง Dashboard จริง
+            Sync tickets จาก <span className="font-mono text-slate-700 dark:text-slate-300">ascendcommerce-support.atlassian.net</span> — ขั้นตอนถัดไปจะให้ตรวจสอบข้อมูลก่อนสร้าง Dashboard
           </p>
         </div>
 

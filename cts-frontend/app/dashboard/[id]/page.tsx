@@ -563,9 +563,9 @@ export default function DashboardPage() {
         <section className="rounded-2xl bg-gradient-to-br from-blue-700 to-blue-500 dark:from-blue-800 dark:to-blue-600 p-6 text-white">
           <p className="text-xs font-semibold uppercase tracking-wider opacity-70 mb-2">Executive Summary</p>
           <p className="text-lg font-medium leading-relaxed mb-5">
-            ช่วงนี้ทีม Tech Support จัดการ <strong>{totalTickets} tickets</strong> ทั้งหมด
+            ทีม Tech Support จัดการ <strong>{totalTickets} tickets</strong> ทั้งหมด
             ปิดได้ <strong>{pct(closedN, totalTickets)}%</strong> ({closedN} tickets)
-            {l3N > 0 && ` · ยังมี ${l3N} ticket ที่อยู่ระหว่างสอบสวน (L3)`}
+            {l3N > 0 && ` · ยังมี ${l3N} ticket ที่อยู่ระหว่างตรวจสอบและแก้ไข (L3)`}
           </p>
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
             <div className="bg-white/15 rounded-xl p-3"><p className="text-2xl font-semibold">{totalTickets}</p><p className="text-xs opacity-75 mt-0.5">Total tickets</p></div>
