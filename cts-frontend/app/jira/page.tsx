@@ -6,11 +6,9 @@ import Link from 'next/link'
 import api from '@/lib/api'
 import ThemeToggle from '@/components/theme/ThemeToggle'
 
-type SyncState =
+type TestState =
   | { state: 'idle' }
   | { state: 'testing' }
-  | { state: 'syncing' }
-  | { state: 'success'; reportId: string; totalTickets: number }
   | { state: 'error'; message: string }
 
 const PRESET_JQL = [
@@ -25,34 +23,28 @@ export default function JiraSyncPage() {
   const router = useRouter()
   const [jql, setJql]               = useState(PRESET_JQL[0].jql)
   const [reportName, setReportName]  = useState(`Jira Sync — ${new Date().toLocaleDateString('th-TH', { day: 'numeric', month: 'long', year: 'numeric' })}`)
-  const [syncState, setSyncState]    = useState<SyncState>({ state: 'idle' })
+  const [testState, setTestState]    = useState<TestState>({ state: 'idle' })
   const [connected, setConnected]    = useState<boolean | null>(null)
 
   const testConnection = async () => {
-    setSyncState({ state: 'testing' })
+    setTestState({ state: 'testing' })
     try {
       await api.get('/api/jira/test')
       setConnected(true)
-      setSyncState({ state: 'idle' })
+      setTestState({ state: 'idle' })
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'เชื่อมต่อ Jira ไม่ได้'
       setConnected(false)
-      setSyncState({ state: 'error', message: msg })
+      setTestState({ state: 'error', message: msg })
     }
   }
 
-  const sync = async () => {
-    setSyncState({ state: 'syncing' })
-    try {
-      const { data } = await api.post('/api/jira/sync', { jql, reportName })
-      setSyncState({ state: 'success', reportId: data.reportId, totalTickets: data.totalTickets })
-    } catch (e: unknown) {
-      const msg = (e as { response?: { data?: { message?: string } } })?.response?.data?.message ?? 'Sync ไม่สำเร็จ'
-      setSyncState({ state: 'error', message: msg })
-    }
+  const goToValidate = () => {
+    const q = new URLSearchParams({ jql, reportName })
+    router.push(`/jira/validate?${q.toString()}`)
   }
 
-  const isBusy = syncState.state === 'testing' || syncState.state === 'syncing'
+  const isBusy = testState.state === 'testing'
 
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-900 transition-colors">
@@ -66,7 +58,6 @@ export default function JiraSyncPage() {
               </svg>
             </Link>
             <div className="flex items-center gap-2">
-              {/* Jira logo color */}
               <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-blue-600">
                 <svg className="h-4 w-4 text-white" fill="currentColor" viewBox="0 0 24 24">
                   <path d="M11.75 2C6.365 2 2 6.365 2 11.75S6.365 21.5 11.75 21.5 21.5 17.135 21.5 11.75 17.135 2 11.75 2zm.917 14.583l-4.167-4.166 4.167-4.167 4.166 4.167-4.166 4.166z"/>
@@ -76,7 +67,6 @@ export default function JiraSyncPage() {
             </div>
           </div>
           <div className="flex items-center gap-3">
-            {/* Connection status */}
             {connected !== null && (
               <div className={`flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full ${connected ? 'bg-green-50 text-green-700 dark:bg-green-900/40 dark:text-green-400' : 'bg-red-50 text-red-600 dark:bg-red-900/40 dark:text-red-400'}`}>
                 <div className={`h-1.5 w-1.5 rounded-full ${connected ? 'bg-green-500' : 'bg-red-500'}`}/>
@@ -94,7 +84,7 @@ export default function JiraSyncPage() {
         <div>
           <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-50">ดึงข้อมูลจาก Jira</h1>
           <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-            Sync tickets จาก <span className="font-mono text-slate-700 dark:text-slate-300">ascendcommerce-support.atlassian.net</span> โดยตรง ไม่ต้องอัปโหลดไฟล์
+            Sync tickets จาก <span className="font-mono text-slate-700 dark:text-slate-300">ascendcommerce-support.atlassian.net</span> — ขั้นตอนถัดไปจะให้ตรวจสอบข้อมูลก่อนสร้าง Dashboard จริง
           </p>
         </div>
 
@@ -107,10 +97,10 @@ export default function JiraSyncPage() {
               disabled={isBusy}
               className="rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 px-3 py-1.5 text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-600 disabled:opacity-40 transition-colors"
             >
-              {syncState.state === 'testing' ? 'กำลังทดสอบ...' : 'ทดสอบ'}
+              {testState.state === 'testing' ? 'กำลังทดสอบ...' : 'ทดสอบ'}
             </button>
           </div>
-          <p className="text-xs text-slate-400 dark:text-slate-500">ตรวจสอบว่า backend เชื่อมต่อกับ Jira ได้ก่อน sync</p>
+          <p className="text-xs text-slate-400 dark:text-slate-500">ตรวจสอบว่า backend เชื่อมต่อกับ Jira ได้ก่อนดำเนินการ</p>
         </div>
 
         {/* Report name */}
@@ -120,8 +110,7 @@ export default function JiraSyncPage() {
             type="text"
             value={reportName}
             onChange={e => setReportName(e.target.value)}
-            disabled={isBusy}
-            className="w-full rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 px-3.5 py-2.5 text-sm text-slate-800 dark:text-slate-100 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-900/50 transition-colors disabled:opacity-50"
+            className="w-full rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 px-3.5 py-2.5 text-sm text-slate-800 dark:text-slate-100 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-900/50 transition-colors"
             placeholder="ชื่อ report"
           />
         </div>
@@ -130,13 +119,11 @@ export default function JiraSyncPage() {
         <div className="rounded-2xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 p-5 space-y-3">
           <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-200">JQL Filter</h2>
 
-          {/* Presets */}
           <div className="flex flex-wrap gap-2">
             {PRESET_JQL.map(p => (
               <button
                 key={p.label}
                 onClick={() => setJql(p.jql)}
-                disabled={isBusy}
                 className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${jql === p.jql ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-700 dark:text-slate-300 dark:hover:bg-slate-600'}`}
               >
                 {p.label}
@@ -144,71 +131,37 @@ export default function JiraSyncPage() {
             ))}
           </div>
 
-          {/* Custom JQL */}
           <textarea
             value={jql}
             onChange={e => setJql(e.target.value)}
-            disabled={isBusy}
             rows={3}
-            className="w-full rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 px-3.5 py-2.5 font-mono text-xs text-slate-700 dark:text-slate-200 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-900/50 transition-colors disabled:opacity-50"
+            className="w-full rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 px-3.5 py-2.5 font-mono text-xs text-slate-700 dark:text-slate-200 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-900/50 transition-colors"
             placeholder="project = CTS AND created >= -7d ORDER BY created DESC"
           />
-          <p className="text-xs text-slate-400 dark:text-slate-500">ปรับ JQL ได้อิสระ — ดึงสูงสุด 500 tickets ต่อครั้ง</p>
+          <p className="text-xs text-slate-400 dark:text-slate-500">
+            ดึงสูงสุด 500 tickets ต่อครั้ง — เงื่อนไขยกเว้นเฉพาะ Key, Summary, Business Unit ปรับได้อีกครั้งในหน้าตรวจสอบถัดไป
+          </p>
         </div>
 
-        {/* Error */}
-        {syncState.state === 'error' && (
-          <div className="rounded-xl border border-red-200 dark:border-red-900/50 bg-red-50 dark:bg-red-950/20 px-5 py-4">
-            <p className="text-sm font-medium text-red-800 dark:text-red-300">เกิดข้อผิดพลาด</p>
-            <p className="text-sm text-red-600 dark:text-red-400 mt-0.5">{syncState.message}</p>
-            <button onClick={() => setSyncState({ state: 'idle' })} className="mt-3 text-xs text-red-600 dark:text-red-400 underline">ลองใหม่</button>
-          </div>
-        )}
+        {/* Info: two-step flow */}
+        <div className="rounded-xl border border-blue-100 dark:border-blue-900/50 bg-blue-50/50 dark:bg-blue-950/20 px-5 py-4 flex gap-3">
+          <svg className="h-5 w-5 text-blue-500 dark:text-blue-400 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z" />
+          </svg>
+          <p className="text-sm text-blue-800 dark:text-blue-300">
+            ขั้นถัดไปจะ<strong>ดึงข้อมูลมาให้ตรวจสอบก่อน</strong> ยังไม่บันทึกลง Dashboard ทันที — คุณจะเห็นรายการที่ข้อมูลไม่ครบ และเลือกได้เองว่าจะรวมรายการไหนบ้าง
+          </p>
+        </div>
 
-        {/* Success */}
-        {syncState.state === 'success' && (
-          <div className="rounded-xl border border-green-200 dark:border-green-900/50 bg-green-50 dark:bg-green-950/20 px-5 py-5 text-center space-y-3">
-            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-green-100 dark:bg-green-900/40">
-              <svg className="h-6 w-6 text-green-600 dark:text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7"/>
-              </svg>
-            </div>
-            <p className="text-sm font-semibold text-green-800 dark:text-green-300">Sync สำเร็จ — {syncState.totalTickets} tickets</p>
-            <div className="flex justify-center gap-2">
-              <button
-                onClick={() => router.push(`/dashboard/${syncState.reportId}`)}
-                className="rounded-lg bg-green-700 px-5 py-2 text-sm font-medium text-white hover:bg-green-800 transition-colors"
-              >
-                ดู Dashboard
-              </button>
-              <button
-                onClick={() => setSyncState({ state: 'idle' })}
-                className="rounded-lg border border-green-300 dark:border-green-800 bg-white dark:bg-slate-800 px-5 py-2 text-sm font-medium text-green-700 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-950/30 transition-colors"
-              >
-                Sync ใหม่
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Sync button */}
-        {syncState.state !== 'success' && (
-          <button
-            onClick={sync}
-            disabled={isBusy || !jql.trim()}
-            className="w-full rounded-xl bg-blue-600 py-3 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-          >
-            {syncState.state === 'syncing' ? (
-              <span className="flex items-center justify-center gap-2">
-                <svg className="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
-                </svg>
-                กำลัง Sync จาก Jira...
-              </span>
-            ) : 'Sync จาก Jira'}
-          </button>
-        )}
+        {/* Continue button */}
+        <button
+          onClick={goToValidate}
+          disabled={!jql.trim()}
+          className="w-full rounded-xl bg-blue-600 py-3 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
+        >
+          ดึงข้อมูลมาตรวจสอบ
+          <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3"/></svg>
+        </button>
 
       </main>
     </div>
