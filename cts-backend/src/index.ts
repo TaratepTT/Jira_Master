@@ -3,6 +3,8 @@ import express from 'express'
 import cors from 'cors'
 import helmet from 'helmet'
 import morgan from 'morgan'
+import jiraRouter from './routes/jira.js'
+
 
 import uploadRouter from './routes/upload.js'
 import reportsRouter from './routes/reports.js'
@@ -48,6 +50,7 @@ app.use('/api/health',  healthRouter)
 app.use('/api/upload',  uploadRouter)
 app.use('/api/reports', reportsRouter)
 app.use('/api/export',  exportRouter)
+app.use('/api/jira', jiraRouter)
 
 // ── 404 ───────────────────────────────────────────────────────
 app.use((_req, res) => {
