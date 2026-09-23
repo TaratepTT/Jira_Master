@@ -5,7 +5,7 @@ const JIRA_EMAIL    = process.env.JIRA_EMAIL ?? ''
 const JIRA_TOKEN    = process.env.JIRA_API_TOKEN ?? ''
 
 const jiraClient = axios.create({
-  baseURL: `${JIRA_BASE_URL}/rest/api/2`,
+  baseURL: `${JIRA_BASE_URL}/rest/api/3`,
   auth: { username: JIRA_EMAIL, password: JIRA_TOKEN },
   headers: {
     'Accept':       'application/json',
@@ -95,58 +95,47 @@ function mapIssue(raw: Record<string, unknown>): JiraIssue {
   }
 }
 
-// ── Fetch issues via JQL with pagination ─────────────────────
+// ── Fetch issues via new Jira Cloud /search/jql endpoint ─────
+// NOTE: This endpoint uses nextPageToken pagination, NOT startAt.
+// See: https://developer.atlassian.com/cloud/jira/platform/changelog/#CHANGE-2046
 export async function fetchJiraIssues(
   jql: string,
   maxTotal = 500
 ): Promise<JiraIssue[]> {
   const issues: JiraIssue[] = []
-  let startAt = 0
-  const pageSize = 50 // smaller page = safer for Jira Cloud rate limits
+  let nextPageToken: string | undefined = undefined
+  const pageSize = 50
 
   while (issues.length < maxTotal) {
+    const body: Record<string, unknown> = {
+      jql,
+      maxResults: pageSize,
+      fields: FIELDS,
+    }
+    if (nextPageToken) body.nextPageToken = nextPageToken
+
     let data: Record<string, unknown>
 
     try {
-      // Jira Cloud API v3 — POST /search
-      const resp = await jiraClient.post('/search', {
-        jql,
-        startAt,
-        maxResults: pageSize,
-        fields: FIELDS,
-      })
+      const resp = await jiraClient.post('/search/jql', body)
       data = resp.data as Record<string, unknown>
     } catch (err: unknown) {
       const e = err as { response?: { status?: number; data?: unknown } }
-      const status = e?.response?.status
-      const errData = e?.response?.data
-
-      // Log full error for debugging
-      console.error(`[jira] POST /search failed — status ${status}:`, JSON.stringify(errData))
-
-      // If /search fails with 410, try legacy /search as GET
-      if (status === 410) {
-        console.log('[jira] Retrying with GET /search...')
-        const resp2 = await jiraClient.get('/search', {
-          params: {
-            jql,
-            startAt,
-            maxResults: pageSize,
-            fields: FIELDS.join(','),
-          },
-        })
-        data = resp2.data as Record<string, unknown>
-      } else {
-        throw err
-      }
+      console.error(
+        `[jira] POST /search/jql failed — status ${e?.response?.status}`,
+        '\nbody sent:', JSON.stringify(body),
+        '\nerror response:', JSON.stringify(e?.response?.data, null, 2)
+      )
+      throw err
     }
 
     const page = (data.issues ?? []) as Record<string, unknown>[]
     issues.push(...page.map(mapIssue))
 
-    const total = Number(data.total ?? 0)
-    if (issues.length >= total || page.length < pageSize) break
-    startAt += pageSize
+    nextPageToken = data.nextPageToken as string | undefined
+    const isLast = Boolean(data.isLast) || !nextPageToken || page.length === 0
+
+    if (isLast) break
   }
 
   return issues
