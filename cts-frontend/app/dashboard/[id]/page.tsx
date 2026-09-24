@@ -396,6 +396,7 @@ export default function DashboardPage() {
   const [data, setData] = useState<ReportData | null>(null)
   const [error, setError] = useState('')
   const [selectedTicket, setSelectedTicket] = useState<TicketDetail | null>(null)
+  const [highlighted, setHighlighted] = useState<Set<string>>(new Set())
   const [search, setSearch] = useState('')
   const [exportingCsv, setExportingCsv] = useState(false)
 
@@ -500,6 +501,15 @@ export default function DashboardPage() {
 
     return sorted
   }, [data, search, buFilter, statusFilter, systemFilter, categoryFilter, sortKey, sortDir])
+
+  const toggleHighlight = (key: string) => {
+    setHighlighted(prev => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  }
 
   const handleSort = (key: SortKey) => {
     if (sortKey === key) {
@@ -609,7 +619,7 @@ export default function DashboardPage() {
           <p className="text-lg font-medium leading-relaxed mb-5">
             ช่วงนี้ทีม Tech Support จัดการ <strong>{totalTickets} tickets</strong> ทั้งหมด
             ปิดได้ <strong>{pct(closedN, totalTickets)}%</strong> ({closedN} tickets)
-            {l3N > 0 && ` · ยังมี ${l3N} ticket ที่อยู่ระหว่างตรวจสอบเพื่อแก้ไข (L3)`}
+            {l3N > 0 && ` · ยังมี ${l3N} ticket ที่อยู่ระหว่างสอบสวน (L3)`}
           </p>
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
             <div className="bg-white/15 rounded-xl p-3"><p className="text-2xl font-semibold">{totalTickets}</p><p className="text-xs opacity-75 mt-0.5">Total tickets</p></div>
@@ -677,8 +687,8 @@ export default function DashboardPage() {
         {/* Frequency Table */}
         <div className="rounded-2xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 p-5">
           <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-200 mb-4">Ticket Frequency by Category</h2>
-          <div className="overflow-x-auto -mx-5 px-5">
-            <table className="w-full text-sm min-w-[900px]">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-slate-200 dark:border-slate-700">
                   <th className="text-left py-2 px-3 text-xs font-medium text-slate-500 dark:text-slate-400">ลำดับ</th>
@@ -710,6 +720,59 @@ export default function DashboardPage() {
               </tbody>
             </table>
           </div>
+        </div>
+
+        {/* Highlighted Issues */}
+        <div className="rounded-2xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 p-5">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-200">
+              รายการที่เลือกไว้ {highlighted.size > 0 && <span className="text-blue-600 dark:text-blue-400">({highlighted.size})</span>}
+            </h2>
+            {highlighted.size > 0 && (
+              <button onClick={() => setHighlighted(new Set())} className="text-xs font-medium text-red-500 hover:underline">
+                ล้างทั้งหมด
+              </button>
+            )}
+          </div>
+
+          {highlighted.size === 0 ? (
+            <p className="text-sm text-slate-400 dark:text-slate-500 py-4 text-center">
+              ยังไม่ได้เลือกรายการ — ติ๊กเลือกจากตาราง Issue Detail ด้านล่าง (เช่น Non-app issue, Human Error) เพื่อนำมาไฮไลท์ตรงนี้
+            </p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-slate-200 dark:border-slate-700">
+                    <th className="text-left py-2 px-3 text-xs font-medium text-slate-500 dark:text-slate-400">Key</th>
+                    <th className="text-left py-2 px-3 text-xs font-medium text-slate-500 dark:text-slate-400">Summary</th>
+                    <th className="text-left py-2 px-3 text-xs font-medium text-slate-500 dark:text-slate-400">Status</th>
+                    <th className="text-left py-2 px-3 text-xs font-medium text-slate-500 dark:text-slate-400">Category</th>
+                    <th className="w-10"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.tickets.filter(t => highlighted.has(t.key)).map(t => (
+                    <tr key={t.key} className="border-b border-slate-100 dark:border-slate-700/50 hover:bg-blue-50 dark:hover:bg-blue-950/20">
+                      <td className="py-2 px-3 font-medium text-blue-600 dark:text-blue-400 whitespace-nowrap">{t.key}</td>
+                      <td className="py-2 px-3 text-slate-700 dark:text-slate-200 max-w-[240px] truncate">{t.summary || '—'}</td>
+                      <td className="py-2 px-3">
+                        <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium whitespace-nowrap ${statusBadge(t.status)}`}>{t.status}</span>
+                      </td>
+                      <td className="py-2 px-3 text-slate-600 dark:text-slate-300">{t.typeOfIssue || '—'}</td>
+                      <td className="py-2 px-3 text-center">
+                        <button onClick={() => toggleHighlight(t.key)} className="text-slate-400 hover:text-red-500 transition-colors">
+                          <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                          </svg>
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
 
         {/* Issue Detail — Root Cause & Resolution & Deploy — with filters & sort */}
@@ -788,8 +851,8 @@ export default function DashboardPage() {
 
           {hasActiveFilterOrSearch && <FilteredInsights tickets={filteredTickets} />}
 
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+          <div className="overflow-x-auto -mx-5 px-5">
+            <table className="w-full text-sm min-w-[900px]">
               <thead>
                 <tr className="border-b border-slate-200 dark:border-slate-700">
                   <SortableHeader label="Key"        sortKey="key"          activeKey={sortKey} dir={sortDir} onSort={handleSort} />
@@ -800,6 +863,7 @@ export default function DashboardPage() {
                   <SortableHeader label="Root Cause" sortKey="rootCause"    activeKey={sortKey} dir={sortDir} onSort={handleSort} />
                   <SortableHeader label="Resolution" sortKey="resolution"   activeKey={sortKey} dir={sortDir} onSort={handleSort} />
                   <SortableHeader label="Deploy"     sortKey="deployDate"   activeKey={sortKey} dir={sortDir} onSort={handleSort} />
+                  <th className="text-center py-2 px-3 text-xs font-medium text-slate-500 dark:text-slate-400">เลือก</th>
                 </tr>
               </thead>
               <tbody>
@@ -843,10 +907,18 @@ export default function DashboardPage() {
                         <span className="text-xs text-slate-300 dark:text-slate-600">—</span>
                       )}
                     </td>
+                    <td className="py-2 px-3 text-center" onClick={(e) => e.stopPropagation()}>
+                      <input
+                        type="checkbox"
+                        checked={highlighted.has(t.key)}
+                        onChange={() => toggleHighlight(t.key)}
+                        className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                      />
+                    </td>
                   </tr>
                 ))}
                 {!filteredTickets.length && (
-                  <tr><td colSpan={8} className="py-8 text-center text-slate-400 text-sm">
+                  <tr><td colSpan={9} className="py-8 text-center text-slate-400 text-sm">
                     ไม่พบข้อมูลที่ตรงกับตัวกรอง
                     {activeFilterCount > 0 && (
                       <button onClick={clearAllFilters} className="ml-2 text-blue-600 dark:text-blue-400 hover:underline">ล้างตัวกรอง</button>
