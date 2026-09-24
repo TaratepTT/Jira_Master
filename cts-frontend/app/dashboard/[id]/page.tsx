@@ -673,8 +673,8 @@ export default function DashboardPage() {
         {/* Frequency Table */}
         <div className="rounded-2xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 p-5">
           <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-200 mb-4">Ticket Frequency by Category</h2>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+          <div className="overflow-x-auto -mx-5 px-5">
+            <table className="w-full text-sm min-w-[900px]">
               <thead>
                 <tr className="border-b border-slate-200 dark:border-slate-700">
                   <th className="text-left py-2 px-3 text-xs font-medium text-slate-500 dark:text-slate-400">ลำดับ</th>
