@@ -609,7 +609,7 @@ export default function DashboardPage() {
           <p className="text-lg font-medium leading-relaxed mb-5">
             ช่วงนี้ทีม Tech Support จัดการ <strong>{totalTickets} tickets</strong> ทั้งหมด
             ปิดได้ <strong>{pct(closedN, totalTickets)}%</strong> ({closedN} tickets)
-            {l3N > 0 && ` · ยังมี ${l3N} ticket ที่อยู่ระหว่างสอบสวน (L3)`}
+            {l3N > 0 && ` · ยังมี ${l3N} ticket ที่อยู่ระหว่างตรวจสอบเพื่อแก้ไข (L3)`}
           </p>
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
             <div className="bg-white/15 rounded-xl p-3"><p className="text-2xl font-semibold">{totalTickets}</p><p className="text-xs opacity-75 mt-0.5">Total tickets</p></div>
@@ -634,7 +634,8 @@ export default function DashboardPage() {
         {/* Row 1: System + Status */}
         <div className="grid gap-5 lg:grid-cols-2">
           <div className="rounded-2xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 p-5">
-            <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-200 mb-4">Issue Type — ระบบ</h2>
+            <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-200 mb-4">Issue Type — ระบบ</h2> {systemEntries.map(([s, c]) => <ProgressBar key={s} label={s} count={c} total={totalTickets} color="bg-blue-500" />)}
+            <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 mt-3 pt-3 border-t border-slate-100 dark:border-slate-700">รวมทั้งหมด: {totalTickets} tickets</p>
             {systemEntries.map(([s, c]) => <ProgressBar key={s} label={s} count={c} total={totalTickets} color="bg-blue-500" />)}
           </div>
           <div className="rounded-2xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 p-5">
@@ -650,6 +651,7 @@ export default function DashboardPage() {
                 </div>
               </div>
             ))}
+            <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 mt-3 pt-3 border-t border-slate-100 dark:border-slate-700">รวมทั้งหมด: {totalTickets} tickets</p>
           </div>
         </div>
 
@@ -662,11 +664,13 @@ export default function DashboardPage() {
               {ag.top5Bu.map((b, i) => <li key={b.name} className="text-sm text-slate-600 dark:text-slate-300">{i+1}. {b.name} <span className="text-slate-400">({b.count})</span></li>)}
             </ol>
             {buEntries.map(([b, c]) => <ProgressBar key={b} label={b} count={c} total={totalTickets} color="bg-purple-400" />)}
+            <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 mt-3 pt-3 border-t border-slate-100 dark:border-slate-700">รวมทั้งหมด: {totalTickets} tickets</p>
           </div>
           <div className="rounded-2xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 p-5">
             <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-200 mb-1">Ticket Type Category</h2>
             <p className="text-xs text-slate-400 mb-4">Top 3 category: {ag.top3Cat.map(c => c.category).join(', ')}</p>
             {catEntries.map(([c, n]) => <ProgressBar key={c} label={c} count={n} total={totalTickets} color="bg-teal-500" />)}
+            <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 mt-3 pt-3 border-t border-slate-100 dark:border-slate-700">รวมทั้งหมด: {totalTickets} tickets</p>
           </div>
         </div>
 
