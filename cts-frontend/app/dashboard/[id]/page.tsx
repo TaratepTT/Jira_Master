@@ -402,6 +402,7 @@ export default function DashboardPage() {
   const [buFilter, setBuFilter]         = useState<string[]>([])
   const [statusFilter, setStatusFilter] = useState<string[]>([])
   const [systemFilter, setSystemFilter] = useState<string[]>([])
+  const [categoryFilter, setCategoryFilter] = useState<string[]>([])
 
   // ── Sort state ────────────────────────────────────────────
   const [sortKey, setSortKey] = useState<SortKey | null>(null)
@@ -444,6 +445,16 @@ export default function DashboardPage() {
     return Object.entries(counts).sort((a, b) => b[1] - a[1]).map(([value, count]) => ({ value, count }))
   }, [data])
 
+  const categoryOptions = useMemo(() => {
+    if (!data) return []
+    const counts: Record<string, number> = {}
+    data.tickets.forEach(t => {
+      const c = t.typeOfIssue || 'ไม่ระบุ'
+      counts[c] = (counts[c] ?? 0) + 1
+    })
+    return Object.entries(counts).sort((a, b) => b[1] - a[1]).map(([value, count]) => ({ value, count }))
+  }, [data])
+
   const filteredTickets = useMemo(() => {
     if (!data) return []
     const result = data.tickets.filter(t => {
@@ -456,8 +467,9 @@ export default function DashboardPage() {
       const matchBu     = !buFilter.length     || buFilter.includes(t.businessUnit || 'ไม่ระบุ')
       const matchStatus = !statusFilter.length || statusFilter.includes(t.status || 'ไม่ระบุ')
       const matchSystem = !systemFilter.length || systemFilter.includes(t.system || 'ไม่ระบุ')
+      const matchCategory = !categoryFilter.length || categoryFilter.includes(t.typeOfIssue || 'ไม่ระบุ')
 
-      return matchSearch && matchBu && matchStatus && matchSystem
+      return matchSearch && matchBu && matchStatus && matchSystem && matchCategory
     })
 
     if (!sortKey) return result
@@ -487,7 +499,7 @@ export default function DashboardPage() {
     })
 
     return sorted
-  }, [data, search, buFilter, statusFilter, systemFilter, sortKey, sortDir])
+  }, [data, search, buFilter, statusFilter, systemFilter, categoryFilter, sortKey, sortDir])
 
   const handleSort = (key: SortKey) => {
     if (sortKey === key) {
@@ -498,13 +510,14 @@ export default function DashboardPage() {
     }
   }
 
-  const activeFilterCount = buFilter.length + statusFilter.length + systemFilter.length
+  const activeFilterCount = buFilter.length + statusFilter.length + systemFilter.length + categoryFilter.length
   const hasActiveFilterOrSearch = activeFilterCount > 0 || search.trim().length > 0
 
   const clearAllFilters = () => {
     setBuFilter([])
     setStatusFilter([])
     setSystemFilter([])
+    setCategoryFilter([])
     setSearch('')
   }
 
@@ -714,6 +727,7 @@ export default function DashboardPage() {
             <MultiSelectFilter label="Business Unit" options={buOptions} selected={buFilter} onChange={setBuFilter} />
             <MultiSelectFilter label="Status" options={statusOptions} selected={statusFilter} onChange={setStatusFilter} />
             <MultiSelectFilter label="System" options={systemOptions} selected={systemFilter} onChange={setSystemFilter} />
+            <MultiSelectFilter label="Category" options={categoryOptions} selected={categoryFilter} onChange={setCategoryFilter} />
             {activeFilterCount > 0 && (
               <button
                 onClick={clearAllFilters}
@@ -731,7 +745,7 @@ export default function DashboardPage() {
           </div>
 
           {/* Active filter chips */}
-          {(buFilter.length > 0 || statusFilter.length > 0 || systemFilter.length > 0) && (
+          {(buFilter.length > 0 || statusFilter.length > 0 || systemFilter.length > 0 || categoryFilter.length > 0) && (
             <div className="flex flex-wrap gap-1.5 mb-4">
               {buFilter.map(v => (
                 <span key={`bu-${v}`} className="flex items-center gap-1 rounded-full bg-blue-50 dark:bg-blue-900/30 px-2.5 py-1 text-xs font-medium text-blue-700 dark:text-blue-300">
@@ -753,6 +767,14 @@ export default function DashboardPage() {
                 <span key={`sys-${v}`} className="flex items-center gap-1 rounded-full bg-teal-50 dark:bg-teal-900/30 px-2.5 py-1 text-xs font-medium text-teal-700 dark:text-teal-300">
                   System: {v}
                   <button onClick={() => setSystemFilter(systemFilter.filter(x => x !== v))} className="hover:text-teal-900 dark:hover:text-teal-100">
+                    <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                  </button>
+                </span>
+              ))}
+              {categoryFilter.map(v => (
+                <span key={`cat-${v}`} className="flex items-center gap-1 rounded-full bg-purple-50 dark:bg-purple-900/30 px-2.5 py-1 text-xs font-medium text-purple-700 dark:text-purple-300">
+                  Category: {v}
+                  <button onClick={() => setCategoryFilter(categoryFilter.filter(x => x !== v))} className="hover:text-purple-900 dark:hover:text-purple-100">
                     <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
                   </button>
                 </span>
