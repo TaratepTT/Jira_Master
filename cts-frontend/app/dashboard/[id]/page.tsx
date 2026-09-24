@@ -41,7 +41,7 @@ interface ReportData {
   aggregations: Aggregations
 }
 
-type SortKey = 'key' | 'summary' | 'businessUnit' | 'status' | 'rootCause' | 'resolution' | 'typeOfIssue'| 'deployDate'
+type SortKey = 'key' | 'summary' | 'businessUnit' | 'status' | 'typeOfIssue' | 'rootCause' | 'resolution' | 'deployDate'
 type SortDir = 'asc' | 'desc'
 
 // ── Helpers ───────────────────────────────────────────────────
@@ -397,6 +397,7 @@ export default function DashboardPage() {
   const [error, setError] = useState('')
   const [selectedTicket, setSelectedTicket] = useState<TicketDetail | null>(null)
   const [search, setSearch] = useState('')
+  const [exportingCsv, setExportingCsv] = useState(false)
 
   const [buFilter, setBuFilter]         = useState<string[]>([])
   const [statusFilter, setStatusFilter] = useState<string[]>([])
@@ -507,6 +508,25 @@ export default function DashboardPage() {
     setSearch('')
   }
 
+  const handleExportCsv = async () => {
+    setExportingCsv(true)
+    try {
+      const response = await api.get(`/api/export/${id}`, { responseType: 'blob' })
+      const url = window.URL.createObjectURL(new Blob([response.data]))
+      const link = document.createElement('a')
+      link.href = url
+      link.setAttribute('download', `${data?.name || 'report'}.csv`)
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      window.URL.revokeObjectURL(url)
+    } catch {
+      alert('Export CSV ไม่สำเร็จ — กรุณา login ใหม่หรือลองอีกครั้ง')
+    } finally {
+      setExportingCsv(false)
+    }
+  }
+
   if (error) return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-900 flex items-center justify-center">
       <div className="text-center space-y-3">
@@ -549,11 +569,21 @@ export default function DashboardPage() {
           <div className="flex items-center gap-2">
             <ThemeToggle />
             <LogoutButton />
-            <a href={`${process.env.NEXT_PUBLIC_API_URL}/api/export/${id}`}
-              className="flex items-center gap-1.5 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-1.5 text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors">
-              <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3"/></svg>
-              Export CSV
-            </a>
+            <button
+              onClick={handleExportCsv}
+              disabled={exportingCsv}
+              className="flex items-center gap-1.5 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-1.5 text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 disabled:opacity-50 transition-colors"
+            >
+              {exportingCsv ? (
+                <svg className="h-3.5 w-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                </svg>
+              ) : (
+                <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3"/></svg>
+              )}
+              {exportingCsv ? 'กำลัง Export...' : 'Export CSV'}
+            </button>
           </div>
         </div>
       </header>
@@ -564,9 +594,9 @@ export default function DashboardPage() {
         <section className="rounded-2xl bg-gradient-to-br from-blue-700 to-blue-500 dark:from-blue-800 dark:to-blue-600 p-6 text-white">
           <p className="text-xs font-semibold uppercase tracking-wider opacity-70 mb-2">Executive Summary</p>
           <p className="text-lg font-medium leading-relaxed mb-5">
-            ทีม Tech Support จัดการ <strong>{totalTickets} tickets</strong> ทั้งหมด
+            ช่วงนี้ทีม Tech Support จัดการ <strong>{totalTickets} tickets</strong> ทั้งหมด
             ปิดได้ <strong>{pct(closedN, totalTickets)}%</strong> ({closedN} tickets)
-            {l3N > 0 && ` · ยังมี ${l3N} ticket ที่อยู่ระหว่างตรวจสอบและแก้ไข (L3)`}
+            {l3N > 0 && ` · ยังมี ${l3N} ticket ที่อยู่ระหว่างสอบสวน (L3)`}
           </p>
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
             <div className="bg-white/15 rounded-xl p-3"><p className="text-2xl font-semibold">{totalTickets}</p><p className="text-xs opacity-75 mt-0.5">Total tickets</p></div>
@@ -648,9 +678,10 @@ export default function DashboardPage() {
                     <td className="py-2 px-3 font-medium text-slate-700 dark:text-slate-200">{row.category}</td>
                     <td className="py-2 px-3 text-right dark:text-slate-300">{row.count}</td>
                     <td className="py-2 px-3 text-right text-slate-500 dark:text-slate-400">{row.pct}</td>
-                    <td className="py-2 px-3"><ExpandableKeys keys={row.keys} /></td>
+                    <td className="py-2 px-3">
+                      <ExpandableKeys keys={row.keys} />
+                    </td>
                   </tr>
-                  
                 ))}
                 <tr className="bg-slate-50 dark:bg-slate-700/50 font-semibold">
                   <td className="py-2 px-3 dark:text-slate-200">-</td>
@@ -741,7 +772,7 @@ export default function DashboardPage() {
                   <SortableHeader label="Status"     sortKey="status"       activeKey={sortKey} dir={sortDir} onSort={handleSort} />
                   <SortableHeader label="Category"   sortKey="typeOfIssue"  activeKey={sortKey} dir={sortDir} onSort={handleSort} />
                   <SortableHeader label="Root Cause" sortKey="rootCause"    activeKey={sortKey} dir={sortDir} onSort={handleSort} />
-                  <SortableHeader label="Resolution" sortKey="resolution"   activeKey={sortKey} dir={sortDir} onSort={handleSort} /> 
+                  <SortableHeader label="Resolution" sortKey="resolution"   activeKey={sortKey} dir={sortDir} onSort={handleSort} />
                   <SortableHeader label="Deploy"     sortKey="deployDate"   activeKey={sortKey} dir={sortDir} onSort={handleSort} />
                 </tr>
               </thead>
@@ -790,14 +821,6 @@ export default function DashboardPage() {
                 ))}
                 {!filteredTickets.length && (
                   <tr><td colSpan={8} className="py-8 text-center text-slate-400 text-sm">
-                    ไม่พบข้อมูลที่ตรงกับตัวกรอง
-                    {activeFilterCount > 0 && (
-                      <button onClick={clearAllFilters} className="ml-2 text-blue-600 dark:text-blue-400 hover:underline">ล้างตัวกรอง</button>
-                    )}
-                  </td></tr>
-                )}
-                {!filteredTickets.length && (
-                  <tr><td colSpan={7} className="py-8 text-center text-slate-400 text-sm">
                     ไม่พบข้อมูลที่ตรงกับตัวกรอง
                     {activeFilterCount > 0 && (
                       <button onClick={clearAllFilters} className="ml-2 text-blue-600 dark:text-blue-400 hover:underline">ล้างตัวกรอง</button>
