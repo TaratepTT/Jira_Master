@@ -634,9 +634,9 @@ export default function DashboardPage() {
         {/* Row 1: System + Status */}
         <div className="grid gap-5 lg:grid-cols-2">
           <div className="rounded-2xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 p-5">
-            <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-200 mb-4">Issue Type — ระบบ</h2> {systemEntries.map(([s, c]) => <ProgressBar key={s} label={s} count={c} total={totalTickets} color="bg-blue-500" />)}
-            <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 mt-3 pt-3 border-t border-slate-100 dark:border-slate-700">รวมทั้งหมด: {totalTickets} tickets</p>
+            <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-200 mb-4">Issue Type — ระบบ</h2>
             {systemEntries.map(([s, c]) => <ProgressBar key={s} label={s} count={c} total={totalTickets} color="bg-blue-500" />)}
+            <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 mt-3 pt-3 border-t border-slate-100 dark:border-slate-700">รวมทั้งหมด: {totalTickets} tickets</p>
           </div>
           <div className="rounded-2xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 p-5">
             <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-200 mb-4">Status Type</h2>
