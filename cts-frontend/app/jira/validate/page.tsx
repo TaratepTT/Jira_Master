@@ -297,8 +297,10 @@ function ValidateScreenInner() {
               <p className="text-xs text-slate-400 dark:text-slate-500">{reportName}</p>
             </div>
           </div>
-          <ThemeToggle />
-          <LogoutButton />
+          <div className="flex items-center gap-2">
+            <ThemeToggle />
+            <LogoutButton />
+          </div>
         </div>
       </header>
 
