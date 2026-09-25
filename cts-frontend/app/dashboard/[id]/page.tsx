@@ -168,28 +168,25 @@ function MultiSelectFilter({ label, options, selected, onChange }: MultiSelectPr
 
 // ── Resizable + Sortable column header ────────────────────────
 function SortableHeader({
-  label, sortKey, activeKey, dir, onSort, width, onResize,
+  label, sortKey, activeKey, dir, onSort, onResize,
 }: {
   label: string
   sortKey: SortKey
   activeKey: SortKey | null
   dir: SortDir
   onSort: (key: SortKey) => void
-  width: number
   onResize: (key: SortKey, w: number) => void
 }) {
   const isActive = activeKey === sortKey
-  const startX = useRef<number>(0)
-  const startW = useRef<number>(0)
+  const thRef = useRef<HTMLTableCellElement>(null)
 
   const onMouseDown = (e: React.MouseEvent) => {
     e.preventDefault()
     e.stopPropagation()
-    startX.current = e.clientX
-    startW.current = width
+    const startX = e.clientX
+    const startW = thRef.current?.offsetWidth ?? 100
     const onMove = (ev: MouseEvent) => {
-      const next = Math.max(60, startW.current + (ev.clientX - startX.current))
-      onResize(sortKey, next)
+      onResize(sortKey, Math.max(60, startW + (ev.clientX - startX)))
     }
     const onUp = () => {
       document.removeEventListener('mousemove', onMove)
@@ -200,7 +197,7 @@ function SortableHeader({
   }
 
   return (
-    <th className="relative text-left py-2 px-3 text-xs font-medium text-slate-500 dark:text-slate-400 select-none">
+    <th ref={thRef} className="relative text-left py-2 px-3 text-xs font-medium text-slate-500 dark:text-slate-400 select-none">
       <span onClick={() => onSort(sortKey)} className="inline-flex items-center gap-1 cursor-pointer hover:text-slate-700 dark:hover:text-slate-200 transition-colors">
         {label}
         <span className="flex flex-col -space-y-1">
@@ -447,7 +444,7 @@ export default function DashboardPage() {
   })
 
   const handleResize = useCallback((key: SortKey, w: number) => {
-    setColWidths(prev => ({ ...prev, [key]: Math.max(60, w) }))
+    setColWidths(prev => ({ ...prev, [key]: w }))
   }, [])
 
   useEffect(() => {
@@ -910,28 +907,17 @@ export default function DashboardPage() {
           {hasActiveFilterOrSearch && <FilteredInsights tickets={filteredTickets} />}
 
           <div className="overflow-x-auto -mx-5 px-5">
-            <table className="text-sm border-collapse" style={{ minWidth: Object.values(colWidths).reduce((a,b)=>a+b,0) + 56 }}>
-              <colgroup>
-                <col style={{ width: colWidths.key }} />
-                <col style={{ width: colWidths.summary }} />
-                <col style={{ width: colWidths.businessUnit }} />
-                <col style={{ width: colWidths.status }} />
-                <col style={{ width: colWidths.typeOfIssue }} />
-                <col style={{ width: colWidths.rootCause }} />
-                <col style={{ width: colWidths.resolution }} />
-                <col style={{ width: colWidths.deployDate }} />
-                <col style={{ width: 56 }} />
-              </colgroup>
+            <table className="text-sm w-full" style={{ tableLayout: 'fixed', minWidth: Object.values(colWidths).reduce((a,b)=>a+b,0) + 56 }}>
               <thead>
                 <tr className="border-b border-slate-200 dark:border-slate-700">
-                  <SortableHeader label="Key"        sortKey="key"          activeKey={sortKey} dir={sortDir} onSort={handleSort} width={colWidths.key}          onResize={handleResize} />
-                  <SortableHeader label="Summary"    sortKey="summary"      activeKey={sortKey} dir={sortDir} onSort={handleSort} width={colWidths.summary}      onResize={handleResize} />
-                  <SortableHeader label="BU"         sortKey="businessUnit" activeKey={sortKey} dir={sortDir} onSort={handleSort} width={colWidths.businessUnit} onResize={handleResize} />
-                  <SortableHeader label="Status"     sortKey="status"       activeKey={sortKey} dir={sortDir} onSort={handleSort} width={colWidths.status}       onResize={handleResize} />
-                  <SortableHeader label="Category"   sortKey="typeOfIssue"  activeKey={sortKey} dir={sortDir} onSort={handleSort} width={colWidths.typeOfIssue}  onResize={handleResize} />
-                  <SortableHeader label="Root Cause" sortKey="rootCause"    activeKey={sortKey} dir={sortDir} onSort={handleSort} width={colWidths.rootCause}    onResize={handleResize} />
-                  <SortableHeader label="Resolution" sortKey="resolution"   activeKey={sortKey} dir={sortDir} onSort={handleSort} width={colWidths.resolution}   onResize={handleResize} />
-                  <SortableHeader label="Deploy"     sortKey="deployDate"   activeKey={sortKey} dir={sortDir} onSort={handleSort} width={colWidths.deployDate}   onResize={handleResize} />
+                  <SortableHeader label="Key"        sortKey="key"          activeKey={sortKey} dir={sortDir} onSort={handleSort} onResize={handleResize} />
+                  <SortableHeader label="Summary"    sortKey="summary"      activeKey={sortKey} dir={sortDir} onSort={handleSort} onResize={handleResize} />
+                  <SortableHeader label="BU"         sortKey="businessUnit" activeKey={sortKey} dir={sortDir} onSort={handleSort} onResize={handleResize} />
+                  <SortableHeader label="Status"     sortKey="status"       activeKey={sortKey} dir={sortDir} onSort={handleSort} onResize={handleResize} />
+                  <SortableHeader label="Category"   sortKey="typeOfIssue"  activeKey={sortKey} dir={sortDir} onSort={handleSort} onResize={handleResize} />
+                  <SortableHeader label="Root Cause" sortKey="rootCause"    activeKey={sortKey} dir={sortDir} onSort={handleSort} onResize={handleResize} />
+                  <SortableHeader label="Resolution" sortKey="resolution"   activeKey={sortKey} dir={sortDir} onSort={handleSort} onResize={handleResize} />
+                  <SortableHeader label="Deploy"     sortKey="deployDate"   activeKey={sortKey} dir={sortDir} onSort={handleSort} onResize={handleResize} />
                   <th className="text-center py-2 px-3 text-xs font-medium text-slate-500 dark:text-slate-400" style={{ width: 56 }}>เลือก</th>
                 </tr>
               </thead>
