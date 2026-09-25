@@ -1,9 +1,10 @@
 'use client'
 
-import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import api from '@/lib/api'
+import { updateTicket } from '@/lib/api'
 import ThemeToggle from '@/components/theme/ThemeToggle'
 import ExpandableKeys from '@/components/dashboard/ExpandableKeys'
 import LogoutButton from '@/components/auth/LogoutButton'
@@ -166,51 +167,38 @@ function MultiSelectFilter({ label, options, selected, onChange }: MultiSelectPr
   )
 }
 
-// ── Resizable + Sortable column header ────────────────────────
+// ── Sortable column header ─────────────────────────────────────
 function SortableHeader({
-  label, sortKey, activeKey, dir, onSort, width, onResize,
+  label, sortKey, activeKey, dir, onSort,
 }: {
   label: string
   sortKey: SortKey
   activeKey: SortKey | null
   dir: SortDir
   onSort: (key: SortKey) => void
-  width: number
-  onResize: (key: SortKey, w: number) => void
 }) {
   const isActive = activeKey === sortKey
-  const thRef = useRef<HTMLTableCellElement>(null)
-
-  const onMouseDown = (e: React.MouseEvent) => {
-    e.preventDefault()
-    e.stopPropagation()
-    const startX = e.clientX
-    const startW = thRef.current?.offsetWidth ?? width
-    const onMove = (ev: MouseEvent) => {
-      onResize(sortKey, Math.max(60, startW + (ev.clientX - startX)))
-    }
-    const onUp = () => {
-      document.removeEventListener('mousemove', onMove)
-      document.removeEventListener('mouseup', onUp)
-    }
-    document.addEventListener('mousemove', onMove)
-    document.addEventListener('mouseup', onUp)
-  }
-
   return (
-    <th ref={thRef} style={{ width, minWidth: width, maxWidth: width }} className="relative text-left py-2 px-3 text-xs font-medium text-slate-500 dark:text-slate-400 select-none">
-      <span onClick={() => onSort(sortKey)} className="inline-flex items-center gap-1 cursor-pointer hover:text-slate-700 dark:hover:text-slate-200 transition-colors">
+    <th
+      onClick={() => onSort(sortKey)}
+      className="text-left py-2 px-3 text-xs font-medium text-slate-500 dark:text-slate-400 cursor-pointer select-none hover:text-slate-700 dark:hover:text-slate-200 transition-colors"
+    >
+      <span className="inline-flex items-center gap-1">
         {label}
         <span className="flex flex-col -space-y-1">
-          <svg className={`h-2.5 w-2.5 ${isActive && dir === 'asc' ? 'text-blue-600 dark:text-blue-400' : 'text-slate-300 dark:text-slate-600'}`} fill="currentColor" viewBox="0 0 20 20"><path d="M10 5l5 6H5l5-6z" /></svg>
-          <svg className={`h-2.5 w-2.5 ${isActive && dir === 'desc' ? 'text-blue-600 dark:text-blue-400' : 'text-slate-300 dark:text-slate-600'}`} fill="currentColor" viewBox="0 0 20 20"><path d="M10 15l-5-6h10l-5 6z" /></svg>
+          <svg
+            className={`h-2.5 w-2.5 ${isActive && dir === 'asc' ? 'text-blue-600 dark:text-blue-400' : 'text-slate-300 dark:text-slate-600'}`}
+            fill="currentColor" viewBox="0 0 20 20"
+          >
+            <path d="M10 5l5 6H5l5-6z" />
+          </svg>
+          <svg
+            className={`h-2.5 w-2.5 ${isActive && dir === 'desc' ? 'text-blue-600 dark:text-blue-400' : 'text-slate-300 dark:text-slate-600'}`}
+            fill="currentColor" viewBox="0 0 20 20"
+          >
+            <path d="M10 15l-5-6h10l-5 6z" />
+          </svg>
         </span>
-      </span>
-      <span
-        onMouseDown={onMouseDown}
-        className="absolute right-0 top-0 h-full w-2 cursor-col-resize flex items-center justify-center group z-10"
-      >
-        <span className="w-px h-4 bg-slate-300 dark:bg-slate-600 group-hover:bg-blue-400 dark:group-hover:bg-blue-500 transition-colors" />
       </span>
     </th>
   )
@@ -309,8 +297,77 @@ function FilteredInsights({ tickets }: { tickets: TicketDetail[] }) {
   )
 }
 
-// ── Ticket Detail Modal ──────────────────────────────────────
-function TicketDetailModal({ ticket, onClose }: { ticket: TicketDetail; onClose: () => void }) {
+// ── Ticket Detail Modal (editable — syncs back to Jira) ────────
+const STATUS_EDIT_OPTIONS = [
+  'Closed', 'Resolved', 'CLOSING', 'Cancel',
+  'L1-In progress', 'L2-Acknowledge', 'L2-IN PROGRESS',
+  'L3-INVESTIGATE', 'Waiting for customer', 'New issue',
+]
+
+function TicketDetailModal({
+  ticket, reportId, onClose, onUpdated,
+}: {
+  ticket: TicketDetail
+  reportId: string
+  onClose: () => void
+  onUpdated: (updated: TicketDetail) => void
+}) {
+  const [editing, setEditing] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  const [warnings, setWarnings] = useState<string[]>([])
+
+  const [draft, setDraft] = useState({
+    businessUnit: ticket.businessUnit || '',
+    typeOfIssue:  ticket.typeOfIssue || '',
+    status:       ticket.status || '',
+    rootCause:    ticket.rootCause || '',
+    resolution:   ticket.resolution || '',
+  })
+
+  const startEdit = () => {
+    setDraft({
+      businessUnit: ticket.businessUnit || '',
+      typeOfIssue:  ticket.typeOfIssue || '',
+      status:       ticket.status || '',
+      rootCause:    ticket.rootCause || '',
+      resolution:   ticket.resolution || '',
+    })
+    setError('')
+    setWarnings([])
+    setEditing(true)
+  }
+
+  const handleSave = async () => {
+    setSaving(true)
+    setError('')
+    setWarnings([])
+    try {
+      const changed: Record<string, string> = {}
+      if (draft.businessUnit !== (ticket.businessUnit || '')) changed.businessUnit = draft.businessUnit
+      if (draft.typeOfIssue  !== (ticket.typeOfIssue || ''))  changed.typeOfIssue  = draft.typeOfIssue
+      if (draft.status       !== (ticket.status || ''))       changed.status       = draft.status
+      if (draft.rootCause    !== (ticket.rootCause || ''))    changed.rootCause    = draft.rootCause
+      if (draft.resolution   !== (ticket.resolution || ''))   changed.resolution   = draft.resolution
+
+      if (Object.keys(changed).length === 0) {
+        setEditing(false)
+        setSaving(false)
+        return
+      }
+
+      const result = await updateTicket(reportId, ticket.key, changed)
+      onUpdated({ ...ticket, ...result.ticket })
+      if (result.warnings.length > 0) setWarnings(result.warnings)
+      setEditing(false)
+    } catch (e: unknown) {
+      const msg = (e as { response?: { data?: { message?: string } } })?.response?.data?.message ?? 'บันทึกไม่สำเร็จ'
+      setError(msg)
+    } finally {
+      setSaving(false)
+    }
+  }
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4"
@@ -327,19 +384,32 @@ function TicketDetailModal({ ticket, onClose }: { ticket: TicketDetail; onClose:
               href={`https://ascendcommerce-support.atlassian.net/browse/${ticket.key}`}
               target="_blank"
               rel="noopener noreferrer"
-              className="text-lg font-semibold text-blue-600 dark:text-blue-400 hover:underline inline-flex items-center gap-1.5"
+              className="text-lg font-semibold text-blue-600 dark:text-blue-400 hover:underline inline-flex items-center gap-1"
             >
               {ticket.key}
-              <svg className="h-4 w-4 opacity-60" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg className="h-3.5 w-3.5 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
               </svg>
             </a>
           </div>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200">
-            <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
+          <div className="flex items-center gap-2">
+            {!editing && (
+              <button
+                onClick={startEdit}
+                className="flex items-center gap-1 rounded-lg border border-slate-300 dark:border-slate-600 px-2.5 py-1 text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors"
+              >
+                <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931z" />
+                </svg>
+                แก้ไข
+              </button>
+            )}
+            <button onClick={onClose} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200">
+              <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
         </div>
 
         <div className="space-y-4 text-sm">
@@ -353,9 +423,19 @@ function TicketDetailModal({ ticket, onClose }: { ticket: TicketDetail; onClose:
           <div className="grid grid-cols-2 gap-3">
             <div>
               <p className="text-xs font-medium text-slate-400 mb-1">Status</p>
-              <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${statusBadge(ticket.status)}`}>
-                {ticket.status}
-              </span>
+              {editing ? (
+                <select
+                  value={draft.status}
+                  onChange={e => setDraft(d => ({ ...d, status: e.target.value }))}
+                  className="w-full rounded-lg border border-blue-400 bg-white dark:bg-slate-700 px-2 py-1.5 text-xs text-slate-800 dark:text-slate-100 outline-none"
+                >
+                  {STATUS_EDIT_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
+                </select>
+              ) : (
+                <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${statusBadge(ticket.status)}`}>
+                  {ticket.status}
+                </span>
+              )}
             </div>
             <div>
               <p className="text-xs font-medium text-slate-400 mb-1">System</p>
@@ -363,11 +443,32 @@ function TicketDetailModal({ ticket, onClose }: { ticket: TicketDetail; onClose:
             </div>
             <div>
               <p className="text-xs font-medium text-slate-400 mb-1">Business Unit</p>
-              <p className="text-slate-700 dark:text-slate-200">{ticket.businessUnit || '—'}</p>
+              {editing ? (
+                <input
+                  type="text"
+                  value={draft.businessUnit}
+                  onChange={e => setDraft(d => ({ ...d, businessUnit: e.target.value }))}
+                  className="w-full rounded-lg border border-blue-400 bg-white dark:bg-slate-700 px-2 py-1.5 text-xs text-slate-800 dark:text-slate-100 outline-none"
+                />
+              ) : (
+                <p className="text-slate-700 dark:text-slate-200">{ticket.businessUnit || '—'}</p>
+              )}
             </div>
             <div>
               <p className="text-xs font-medium text-slate-400 mb-1">Type of Issue</p>
-              <p className="text-slate-700 dark:text-slate-200">{ticket.typeOfIssue || '—'}</p>
+              {editing ? (
+                <select
+                  value={draft.typeOfIssue}
+                  onChange={e => setDraft(d => ({ ...d, typeOfIssue: e.target.value }))}
+                  className="w-full rounded-lg border border-blue-400 bg-white dark:bg-slate-700 px-2 py-1.5 text-xs text-slate-800 dark:text-slate-100 outline-none"
+                >
+                  {['Non-app issue', 'User request', 'Human Error', 'Data Issue', 'Other'].map(s => (
+                    <option key={s} value={s}>{s}</option>
+                  ))}
+                </select>
+              ) : (
+                <p className="text-slate-700 dark:text-slate-200">{ticket.typeOfIssue || '—'}</p>
+              )}
             </div>
             <div>
               <p className="text-xs font-medium text-slate-400 mb-1">Deploy Date</p>
@@ -391,9 +492,18 @@ function TicketDetailModal({ ticket, onClose }: { ticket: TicketDetail; onClose:
               </svg>
               Root Cause
             </p>
-            <p className="text-sm text-slate-700 dark:text-slate-200 whitespace-pre-wrap">
-              {ticket.rootCause || <span className="text-slate-400 italic">ไม่มีข้อมูล</span>}
-            </p>
+            {editing ? (
+              <textarea
+                value={draft.rootCause}
+                onChange={e => setDraft(d => ({ ...d, rootCause: e.target.value }))}
+                rows={3}
+                className="w-full rounded-lg border border-red-300 dark:border-red-800 bg-white dark:bg-slate-700 px-2 py-1.5 text-xs text-slate-800 dark:text-slate-100 outline-none resize-none"
+              />
+            ) : (
+              <p className="text-sm text-slate-700 dark:text-slate-200 whitespace-pre-wrap">
+                {ticket.rootCause || <span className="text-slate-400 italic">ไม่มีข้อมูล</span>}
+              </p>
+            )}
           </div>
 
           <div className="rounded-xl bg-green-50 dark:bg-green-950/30 border border-green-100 dark:border-green-900/50 p-4">
@@ -403,10 +513,59 @@ function TicketDetailModal({ ticket, onClose }: { ticket: TicketDetail; onClose:
               </svg>
               Resolution
             </p>
-            <p className="text-sm text-slate-700 dark:text-slate-200 whitespace-pre-wrap">
-              {ticket.resolution || <span className="text-slate-400 italic">ไม่มีข้อมูล</span>}
-            </p>
+            {editing ? (
+              <textarea
+                value={draft.resolution}
+                onChange={e => setDraft(d => ({ ...d, resolution: e.target.value }))}
+                rows={3}
+                className="w-full rounded-lg border border-green-300 dark:border-green-800 bg-white dark:bg-slate-700 px-2 py-1.5 text-xs text-slate-800 dark:text-slate-100 outline-none resize-none"
+              />
+            ) : (
+              <p className="text-sm text-slate-700 dark:text-slate-200 whitespace-pre-wrap">
+                {ticket.resolution || <span className="text-slate-400 italic">ไม่มีข้อมูล</span>}
+              </p>
+            )}
           </div>
+
+          {error && (
+            <div className="rounded-lg bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900/50 px-3 py-2">
+              <p className="text-xs text-red-600 dark:text-red-400">{error}</p>
+            </div>
+          )}
+          {warnings.length > 0 && (
+            <div className="rounded-lg bg-orange-50 dark:bg-orange-950/30 border border-orange-200 dark:border-orange-900/50 px-3 py-2 space-y-1">
+              {warnings.map((w, i) => (
+                <p key={i} className="text-xs text-orange-600 dark:text-orange-400">{w}</p>
+              ))}
+            </div>
+          )}
+
+          {editing && (
+            <div className="flex items-center gap-2 pt-2">
+              <button
+                onClick={handleSave}
+                disabled={saving}
+                className="flex-1 flex items-center justify-center gap-1.5 rounded-lg bg-blue-600 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
+              >
+                {saving ? (
+                  <>
+                    <svg className="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                    </svg>
+                    กำลังบันทึกและ sync ไป Jira...
+                  </>
+                ) : 'บันทึกและ Sync ไป Jira'}
+              </button>
+              <button
+                onClick={() => setEditing(false)}
+                disabled={saving}
+                className="rounded-lg border border-slate-300 dark:border-slate-600 px-4 py-2 text-sm font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 disabled:opacity-50 transition-colors"
+              >
+                ยกเลิก
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -431,46 +590,6 @@ export default function DashboardPage() {
   // ── Sort state ────────────────────────────────────────────
   const [sortKey, setSortKey] = useState<SortKey | null>(null)
   const [sortDir, setSortDir] = useState<SortDir>('asc')
-
-  // ── Column widths (resizable) ─────────────────────────────
-  const [colWidths, setColWidths] = useState<Record<SortKey, number>>({
-    key:          100,
-    summary:      200,
-    businessUnit: 130,
-    status:       110,
-    typeOfIssue:  140,
-    rootCause:    200,
-    resolution:   200,
-    deployDate:   110,
-  })
-
-  const handleResize = useCallback((key: SortKey, w: number) => {
-    setColWidths(prev => ({ ...prev, [key]: w }))
-  }, [])
-
-  const [refreshingJira, setRefreshingJira] = useState(false)
-  const [refreshMsg, setRefreshMsg] = useState<string | null>(null)
-
-  const handleRefreshFromJira = async () => {
-    if (!id) return
-    setRefreshingJira(true)
-    setRefreshMsg(null)
-    try {
-      const r = await api.post(`/api/reports/${id}/refresh`)
-      const { updatedCount, notFoundInJira, ...payload } = r.data as ReportData & { updatedCount: number; notFoundInJira: number }
-      setData(payload)
-      setRefreshMsg(
-        notFoundInJira > 0
-          ? `อัปเดตแล้ว ${updatedCount} tickets — ไม่พบ ${notFoundInJira} tickets ใน Jira`
-          : `อัปเดตข้อมูลจาก Jira แล้ว ${updatedCount} tickets`
-      )
-    } catch (e: any) {
-      setRefreshMsg(e?.response?.data?.message ?? 'รีเฟรชจาก Jira ไม่สำเร็จ')
-    } finally {
-      setRefreshingJira(false)
-      setTimeout(() => setRefreshMsg(null), 5000)
-    }
-  }
 
   useEffect(() => {
     if (!id) return
@@ -656,17 +775,6 @@ export default function DashboardPage() {
             <ThemeToggle />
             <LogoutButton />
             <button
-              onClick={handleRefreshFromJira}
-              disabled={refreshingJira}
-              title="ดึงข้อมูลล่าสุดของทุก ticket ใน report นี้จาก Jira มาอัปเดต"
-              className="flex items-center gap-1.5 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-1.5 text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 disabled:opacity-50 transition-colors"
-            >
-              <svg className={`h-3.5 w-3.5 ${refreshingJira ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" />
-              </svg>
-              {refreshingJira ? 'กำลังรีเฟรช...' : 'รีเฟรชจาก Jira'}
-            </button>
-            <button
               onClick={handleExportCsv}
               disabled={exportingCsv}
               className="flex items-center gap-1.5 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-1.5 text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 disabled:opacity-50 transition-colors"
@@ -685,23 +793,15 @@ export default function DashboardPage() {
         </div>
       </header>
 
-      {refreshMsg && (
-        <div className="mx-auto max-w-6xl px-4 sm:px-6 pt-4">
-          <div className="rounded-xl border border-blue-200 dark:border-blue-900/50 bg-blue-50 dark:bg-blue-950/20 px-4 py-2.5 text-sm text-blue-700 dark:text-blue-300">
-            {refreshMsg}
-          </div>
-        </div>
-      )}
-
       <main className="mx-auto max-w-6xl px-4 sm:px-6 py-8 space-y-8">
 
         {/* Executive Summary */}
         <section className="rounded-2xl bg-gradient-to-br from-blue-700 to-blue-500 dark:from-blue-800 dark:to-blue-600 p-6 text-white">
           <p className="text-xs font-semibold uppercase tracking-wider opacity-70 mb-2">Executive Summary</p>
           <p className="text-lg font-medium leading-relaxed mb-5">
-            ทีม Tech Support จัดการ <strong>{totalTickets} tickets</strong> ทั้งหมด
+            ช่วงนี้ทีม Tech Support จัดการ <strong>{totalTickets} tickets</strong> ทั้งหมด
             ปิดได้ <strong>{pct(closedN, totalTickets)}%</strong> ({closedN} tickets)
-            {l3N > 0 && ` · ยังมี ${l3N} ticket ที่อยู่ระหว่างตรวจสอบและทำการแก้ไข (L3)`}
+            {l3N > 0 && ` · ยังมี ${l3N} ticket ที่อยู่ระหว่างสอบสวน (L3)`}
           </p>
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
             <div className="bg-white/15 rounded-xl p-3"><p className="text-2xl font-semibold">{totalTickets}</p><p className="text-xs opacity-75 mt-0.5">Total tickets</p></div>
@@ -835,31 +935,14 @@ export default function DashboardPage() {
                 </thead>
                 <tbody>
                   {data.tickets.filter(t => highlighted.has(t.key)).map(t => (
-                    <tr
-                      key={t.key}
-                      onClick={() => setSelectedTicket(t)}
-                      className="border-b border-slate-100 dark:border-slate-700/50 hover:bg-blue-50 dark:hover:bg-blue-950/20 cursor-pointer"
-                    >
-                      <td className="py-2 px-3 font-medium whitespace-nowrap">
-                        <a
-                          href={`https://ascendcommerce-support.atlassian.net/browse/${t.key}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          onClick={(e) => e.stopPropagation()}
-                          className="text-blue-600 dark:text-blue-400 hover:underline inline-flex items-center gap-1"
-                        >
-                          {t.key}
-                          <svg className="h-3 w-3 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
-                          </svg>
-                        </a>
-                      </td>
-                      <td className="py-2 px-3 text-slate-700 dark:text-slate-200 whitespace-normal break-words min-w-[200px] max-w-[400px]">{t.summary || '—'}</td>
+                    <tr key={t.key} className="border-b border-slate-100 dark:border-slate-700/50 hover:bg-blue-50 dark:hover:bg-blue-950/20">
+                      <td className="py-2 px-3 font-medium text-blue-600 dark:text-blue-400 whitespace-nowrap">{t.key}</td>
+                      <td className="py-2 px-3 text-slate-700 dark:text-slate-200 max-w-[240px] truncate">{t.summary || '—'}</td>
                       <td className="py-2 px-3">
                         <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium whitespace-nowrap ${statusBadge(t.status)}`}>{t.status}</span>
                       </td>
                       <td className="py-2 px-3 text-slate-600 dark:text-slate-300">{t.typeOfIssue || '—'}</td>
-                      <td className="py-2 px-3 text-center" onClick={(e) => e.stopPropagation()}>
+                      <td className="py-2 px-3 text-center">
                         <button onClick={() => toggleHighlight(t.key)} className="text-slate-400 hover:text-red-500 transition-colors">
                           <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -951,18 +1034,18 @@ export default function DashboardPage() {
           {hasActiveFilterOrSearch && <FilteredInsights tickets={filteredTickets} />}
 
           <div className="overflow-x-auto -mx-5 px-5">
-            <table className="text-sm" style={{ tableLayout: 'fixed', width: Object.values(colWidths).reduce((a,b)=>a+b,0) + 56 }}>
+            <table className="w-full text-sm min-w-[900px]">
               <thead>
                 <tr className="border-b border-slate-200 dark:border-slate-700">
-                  <SortableHeader label="Key"        sortKey="key"          activeKey={sortKey} dir={sortDir} onSort={handleSort} width={colWidths.key}          onResize={handleResize} />
-                  <SortableHeader label="Summary"    sortKey="summary"      activeKey={sortKey} dir={sortDir} onSort={handleSort} width={colWidths.summary}      onResize={handleResize} />
-                  <SortableHeader label="BU"         sortKey="businessUnit" activeKey={sortKey} dir={sortDir} onSort={handleSort} width={colWidths.businessUnit} onResize={handleResize} />
-                  <SortableHeader label="Status"     sortKey="status"       activeKey={sortKey} dir={sortDir} onSort={handleSort} width={colWidths.status}       onResize={handleResize} />
-                  <SortableHeader label="Category"   sortKey="typeOfIssue"  activeKey={sortKey} dir={sortDir} onSort={handleSort} width={colWidths.typeOfIssue}  onResize={handleResize} />
-                  <SortableHeader label="Root Cause" sortKey="rootCause"    activeKey={sortKey} dir={sortDir} onSort={handleSort} width={colWidths.rootCause}    onResize={handleResize} />
-                  <SortableHeader label="Resolution" sortKey="resolution"   activeKey={sortKey} dir={sortDir} onSort={handleSort} width={colWidths.resolution}   onResize={handleResize} />
-                  <SortableHeader label="Deploy"     sortKey="deployDate"   activeKey={sortKey} dir={sortDir} onSort={handleSort} width={colWidths.deployDate}   onResize={handleResize} />
-                  <th className="text-center py-2 px-3 text-xs font-medium text-slate-500 dark:text-slate-400" style={{ width: 56, minWidth: 56, maxWidth: 56 }}>เลือก</th>
+                  <SortableHeader label="Key"        sortKey="key"          activeKey={sortKey} dir={sortDir} onSort={handleSort} />
+                  <SortableHeader label="Summary"    sortKey="summary"      activeKey={sortKey} dir={sortDir} onSort={handleSort} />
+                  <SortableHeader label="BU"         sortKey="businessUnit" activeKey={sortKey} dir={sortDir} onSort={handleSort} />
+                  <SortableHeader label="Status"     sortKey="status"       activeKey={sortKey} dir={sortDir} onSort={handleSort} />
+                  <SortableHeader label="Category"   sortKey="typeOfIssue"  activeKey={sortKey} dir={sortDir} onSort={handleSort} />
+                  <SortableHeader label="Root Cause" sortKey="rootCause"    activeKey={sortKey} dir={sortDir} onSort={handleSort} />
+                  <SortableHeader label="Resolution" sortKey="resolution"   activeKey={sortKey} dir={sortDir} onSort={handleSort} />
+                  <SortableHeader label="Deploy"     sortKey="deployDate"   activeKey={sortKey} dir={sortDir} onSort={handleSort} />
+                  <th className="text-center py-2 px-3 text-xs font-medium text-slate-500 dark:text-slate-400">เลือก</th>
                 </tr>
               </thead>
               <tbody>
@@ -986,14 +1069,14 @@ export default function DashboardPage() {
                         </svg>
                       </a>
                     </td>
-                    <td className="py-2 px-3 text-slate-700 dark:text-slate-200 overflow-hidden"><span className="block truncate" title={t.summary || ''}>{t.summary || '—'}</span></td>
-                    <td className="py-2 px-3 text-slate-600 dark:text-slate-300 overflow-hidden"><span className="block truncate" title={t.businessUnit || ''}>{t.businessUnit || '—'}</span></td>
+                    <td className="py-2 px-3 text-slate-700 dark:text-slate-200 max-w-[160px] truncate">{t.summary || '—'}</td>
+                    <td className="py-2 px-3 text-slate-600 dark:text-slate-300 max-w-[120px] truncate">{t.businessUnit || '—'}</td>
                     <td className="py-2 px-3">
                       <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium whitespace-nowrap ${statusBadge(t.status)}`}>{t.status}</span>
                     </td>
-                    <td className="py-2 px-3 text-slate-600 dark:text-slate-300 overflow-hidden"><span className="block truncate" title={t.typeOfIssue || ''}>{t.typeOfIssue || <span className="text-slate-300 dark:text-slate-600">—</span>}</span></td>
-                    <td className="py-2 px-3 text-slate-600 dark:text-slate-300 overflow-hidden"><span className="block truncate" title={t.rootCause || ''}>{t.rootCause || <span className="text-slate-300 dark:text-slate-600">—</span>}</span></td>
-                    <td className="py-2 px-3 text-slate-600 dark:text-slate-300 overflow-hidden"><span className="block truncate" title={t.resolution || ''}>{t.resolution || <span className="text-slate-300 dark:text-slate-600">—</span>}</span></td>
+                    <td className="py-2 px-3 text-slate-600 dark:text-slate-300 max-w-[140px] truncate">{t.typeOfIssue || <span className="text-slate-300 dark:text-slate-600">—</span>}</td>
+                    <td className="py-2 px-3 text-slate-600 dark:text-slate-300 max-w-[180px] truncate">{t.rootCause || <span className="text-slate-300 dark:text-slate-600">—</span>}</td>
+                    <td className="py-2 px-3 text-slate-600 dark:text-slate-300 max-w-[180px] truncate">{t.resolution || <span className="text-slate-300 dark:text-slate-600">—</span>}</td>
                     <td className="py-2 px-3 whitespace-nowrap">
                       {t.deployDate ? (
                         <span className="inline-flex items-center gap-1 text-xs font-medium text-indigo-600 dark:text-indigo-400">
@@ -1033,7 +1116,18 @@ export default function DashboardPage() {
       </main>
 
       {selectedTicket && (
-        <TicketDetailModal ticket={selectedTicket} onClose={() => setSelectedTicket(null)} />
+        <TicketDetailModal
+          ticket={selectedTicket}
+          reportId={id as string}
+          onClose={() => setSelectedTicket(null)}
+          onUpdated={(updated) => {
+            setSelectedTicket(updated)
+            setData(prev => prev ? {
+              ...prev,
+              tickets: prev.tickets.map(t => t.key === updated.key ? updated : t),
+            } : prev)
+          }}
+        />
       )}
     </div>
   )

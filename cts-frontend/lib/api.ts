@@ -62,4 +62,34 @@ export async function deleteReport(id: string) {
   await api.delete(`/api/reports/${id}`)
 }
 
+// ── Update a ticket + sync to Jira ───────────────────────────
+export interface TicketUpdateInput {
+  businessUnit?: string
+  typeOfIssue?: string
+  rootCause?: string
+  resolution?: string
+  status?: string
+}
+
+export async function updateTicket(reportId: string, key: string, input: TicketUpdateInput) {
+  const { data } = await api.patch(`/api/reports/${reportId}/tickets/${key}`, input)
+  return data as {
+    message: string
+    warnings: string[]
+    ticket: {
+      key: string
+      system: string
+      status: string
+      businessUnit: string
+      typeOfIssue: string
+      recurringCategory: string
+      standaloneCategory: string
+      summary: string
+      rootCause: string
+      resolution: string
+      deployDate: string
+    }
+  }
+}
+
 export default api

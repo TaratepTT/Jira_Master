@@ -146,4 +146,121 @@ export async function testJiraConnection(): Promise<{ ok: boolean; email: string
   return { ok: true, email: (data as { emailAddress: string }).emailAddress }
 }
 
+// ══════════════════════════════════════════════════════════════
+// ── WRITE OPERATIONS — update Jira issues from the Dashboard ───
+// ══════════════════════════════════════════════════════════════
+
+// Field IDs used when writing back (must match the ones used for reading)
+const WRITE_FIELD_IDS = {
+  businessUnit: 'customfield_10207', // plain text field
+  typeOfIssue:  'customfield_10169', // select/option field
+  rootCause:    'customfield_10079', // textarea field (plain string)
+  resolution:   'customfield_10053', // textarea field (plain string)
+}
+
+export interface JiraUpdateInput {
+  businessUnit?: string
+  typeOfIssue?: string
+  rootCause?: string
+  resolution?: string
+  status?: string // target status NAME (e.g. "Closed") — resolved via transitions
+}
+
+// ── Update plain/select fields on an issue (PUT /issue/{key}) ───
+async function updateJiraFields(key: string, fields: Record<string, unknown>): Promise<void> {
+  if (Object.keys(fields).length === 0) return
+  try {
+    await jiraClient.put(`/issue/${key}`, { fields })
+  } catch (err: unknown) {
+    const e = err as { response?: { status?: number; data?: unknown } }
+    console.error(`[jira] PUT /issue/${key} failed — status ${e?.response?.status}`, JSON.stringify(e?.response?.data))
+    throw new Error(`อัปเดต Jira ไม่สำเร็จ (${key}): ${JSON.stringify(e?.response?.data ?? err)}`)
+  }
+}
+
+// ── Get available workflow transitions for an issue ─────────────
+interface JiraTransition {
+  id: string
+  name: string
+  to: { name: string }
+}
+
+async function getTransitions(key: string): Promise<JiraTransition[]> {
+  const { data } = await jiraClient.get(`/issue/${key}/transitions`)
+  return (data.transitions ?? []) as JiraTransition[]
+}
+
+// ── Transition an issue to a target status by NAME ───────────────
+// Jira statuses are workflow-controlled — you can't just set a field,
+// you must find the transition that leads to the desired status.
+async function transitionIssueToStatus(key: string, targetStatusName: string): Promise<{ ok: boolean; message?: string }> {
+  const transitions = await getTransitions(key)
+
+  const match = transitions.find(
+    t => t.to.name.toLowerCase() === targetStatusName.toLowerCase()
+      || t.name.toLowerCase() === targetStatusName.toLowerCase()
+  )
+
+  if (!match) {
+    const available = transitions.map(t => t.to.name).join(', ')
+    return {
+      ok: false,
+      message: `ไม่สามารถเปลี่ยนสถานะเป็น "${targetStatusName}" ได้ — สถานะที่เปลี่ยนได้ตอนนี้คือ: ${available || 'ไม่มี'}`,
+    }
+  }
+
+  try {
+    await jiraClient.post(`/issue/${key}/transitions`, {
+      transition: { id: match.id },
+    })
+    return { ok: true }
+  } catch (err: unknown) {
+    const e = err as { response?: { status?: number; data?: unknown } }
+    console.error(`[jira] transition failed for ${key}`, JSON.stringify(e?.response?.data))
+    return { ok: false, message: 'เปลี่ยนสถานะใน Jira ไม่สำเร็จ' }
+  }
+}
+
+// ── Main entry point: push a set of dashboard edits back to Jira ─
+// Returns which parts succeeded/failed so the caller can report clearly.
+export async function pushTicketUpdateToJira(
+  key: string,
+  input: JiraUpdateInput
+): Promise<{ ok: boolean; warnings: string[] }> {
+  const warnings: string[] = []
+
+  // 1) Plain/select fields (Business Unit, Type of Issue, Root Cause, Resolution)
+  const fields: Record<string, unknown> = {}
+
+  if (input.businessUnit !== undefined) {
+    fields[WRITE_FIELD_IDS.businessUnit] = input.businessUnit
+  }
+  if (input.typeOfIssue !== undefined) {
+    fields[WRITE_FIELD_IDS.typeOfIssue] = { value: input.typeOfIssue }
+  }
+  if (input.rootCause !== undefined) {
+    fields[WRITE_FIELD_IDS.rootCause] = input.rootCause
+  }
+  if (input.resolution !== undefined) {
+    fields[WRITE_FIELD_IDS.resolution] = input.resolution
+  }
+
+  if (Object.keys(fields).length > 0) {
+    try {
+      await updateJiraFields(key, fields)
+    } catch (err) {
+      warnings.push(err instanceof Error ? err.message : 'อัปเดตข้อมูลบางส่วนไม่สำเร็จ')
+    }
+  }
+
+  // 2) Status — requires a workflow transition, handled separately
+  if (input.status) {
+    const result = await transitionIssueToStatus(key, input.status)
+    if (!result.ok && result.message) warnings.push(result.message)
+  }
+
+  return { ok: warnings.length === 0, warnings }
+}
+
 export default jiraClient
+
