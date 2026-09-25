@@ -422,6 +422,7 @@ function ValidateScreenInner() {
                       />
                     </td>
                     <td className="py-2 px-3 font-medium text-blue-600 dark:text-blue-400 whitespace-nowrap">{t.key}</td>
+                    
                     <td className="py-2 px-3 text-slate-700 dark:text-slate-200">
                       <EditableText value={t.summary ?? ''} onSave={v => editField(t.key, 'summary', v)} placeholder="ไม่มี summary" />
                     </td>
