@@ -42,6 +42,8 @@ const REQUIRED_FIELDS: Array<{ key: EditableField | 'key' | 'system'; label: str
   { key: 'businessUnit', label: 'ไม่มี Business Unit' },
   { key: 'typeOfIssue',  label: 'ไม่มี Type of Issue' },
   { key: 'system',       label: 'ไม่มี System' },
+  { key: 'rootCause',    label: 'ไม่มี Root Cause' },
+  { key: 'resolution',   label: 'ไม่มี Resolution' },
 ]
 
 // Recompute validation problems for a single ticket after an inline edit
@@ -52,6 +54,8 @@ function revalidate(t: PreviewTicket, allKeys: string[]): PreviewTicket {
   if (!t.businessUnit) problems.push('ไม่มี Business Unit')
   if (!t.typeOfIssue) problems.push('ไม่มี Type of Issue')
   if (!t.system) problems.push('ไม่มี System')
+  if (!t.rootCause) problems.push('ไม่มี Root Cause')
+  if (!t.resolution) problems.push('ไม่มี Resolution')
   const dupCount = allKeys.filter(k => k === t.key).length
   if (dupCount > 1) problems.push('Key ซ้ำในชุดข้อมูลนี้')
   return { ...t, problems, valid: problems.length === 0 }

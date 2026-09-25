@@ -21,6 +21,8 @@ function validateIssue(i: JiraIssue): string[] {
   if (!i.businessUnit)              problems.push('ไม่มี Business Unit')
   if (!i.typeOfIssue)               problems.push('ไม่มี Type of Issue')
   if (!i.system)                    problems.push('ไม่มี System')
+  if (!i.rootCause)                 problems.push('ไม่มี Root Cause')
+  if (!i.resolution)                problems.push('ไม่มี Resolution')
   return problems
 }
 
