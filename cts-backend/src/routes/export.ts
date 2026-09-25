@@ -24,16 +24,16 @@ router.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
 
     const rows = report.tickets.map((t) => ({
       'Issue Key':                  t.key,
-      'System':                     t.system,
-      'Status':                     t.status,
-      'Business Unit':              t.businessUnit,
-      'Type of Issue':              t.typeOfIssue,
-      'Recurring Issue Category':   t.recurringCategory,
-      'Standalone Category':        t.standaloneCategory,
       'Summary':                    t.summary ?? '',
+      'Business Unit':              t.businessUnit,
+      'Status':                     t.status,
+      'Type of Issue':              t.typeOfIssue,
       'Root Cause':                 t.rootCause ?? '',
       'Resolution':                 t.resolution ?? '',
       'Deploy Date':                t.deployDate ?? '',
+      'System':                     t.system,
+      'Recurring Issue Category':   t.recurringCategory,
+      'Standalone Category':        t.standaloneCategory,
     }))
 
     const csv = Papa.unparse(rows)
