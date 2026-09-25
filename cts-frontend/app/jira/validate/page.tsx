@@ -385,6 +385,7 @@ function ValidateScreenInner() {
                 <col className="w-52" />
                 <col className="w-32" />
                 <col className="w-32" />
+                <col className="w-36" />
                 <col className="w-44" />
                 <col className="w-44" />
                 <col className="w-28" />
@@ -396,6 +397,7 @@ function ValidateScreenInner() {
                   <th className="text-left py-2.5 px-3 text-xs font-medium text-slate-500 dark:text-slate-400">Summary</th>
                   <th className="text-left py-2.5 px-3 text-xs font-medium text-slate-500 dark:text-slate-400">BU</th>
                   <th className="text-left py-2.5 px-3 text-xs font-medium text-slate-500 dark:text-slate-400">Status</th>
+                  <th className="text-left py-2.5 px-3 text-xs font-medium text-slate-500 dark:text-slate-400">Category</th>
                   <th className="text-left py-2.5 px-3 text-xs font-medium text-slate-500 dark:text-slate-400">Root Cause</th>
                   <th className="text-left py-2.5 px-3 text-xs font-medium text-slate-500 dark:text-slate-400">Resolution</th>
                   <th className="text-left py-2.5 px-3 text-xs font-medium text-slate-500 dark:text-slate-400">ปัญหา</th>
@@ -440,6 +442,9 @@ function ValidateScreenInner() {
                       <EditableSelect value={t.status} options={statusOptions} onSave={v => editField(t.key, 'status', v)} />
                     </td>
                     <td className="py-2 px-3 text-slate-600 dark:text-slate-300">
+                      <EditableText value={t.typeOfIssue ?? ''} onSave={v => editField(t.key, 'typeOfIssue', v)} placeholder="ไม่มี Category" />
+                    </td>
+                    <td className="py-2 px-3 text-slate-600 dark:text-slate-300">
                       <EditableText value={t.rootCause ?? ''} onSave={v => editField(t.key, 'rootCause', v)} placeholder="ไม่มีข้อมูล" multiline />
                     </td>
                     <td className="py-2 px-3 text-slate-600 dark:text-slate-300">
@@ -464,7 +469,7 @@ function ValidateScreenInner() {
                   </tr>
                 ))}
                 {!filteredTickets.length && (
-                  <tr><td colSpan={8} className="py-10 text-center text-sm text-slate-400">ไม่พบข้อมูลที่ตรงกับตัวกรอง</td></tr>
+                  <tr><td colSpan={9} className="py-10 text-center text-sm text-slate-400">ไม่พบข้อมูลที่ตรงกับตัวกรอง</td></tr>
                 )}
               </tbody>
             </table>
