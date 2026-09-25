@@ -153,23 +153,45 @@ function ValidateScreenInner() {
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [viewFilter, setViewFilter] = useState<ViewFilter>('all')
   const [search, setSearch] = useState('')
+  const [refreshing, setRefreshing] = useState(false)
 
-  useEffect(() => {
+  // ── Pull latest data straight from Jira (used on mount + refresh button) ──
+  const loadFromJira = (isRefresh = false) => {
     if (!jql) {
       setLoadState({ state: 'error', message: 'ไม่พบ JQL — กลับไปตั้งค่าที่หน้า Jira Sync' })
       return
     }
+    if (isRefresh) setRefreshing(true)
+    else setLoadState({ state: 'loading' })
+
     api.post('/api/jira/preview-all', { jql })
       .then(r => {
         const data = r.data as { tickets: PreviewTicket[] }
         setTickets(data.tickets)
-        setSelected(new Set(data.tickets.filter(t => t.valid).map(t => t.key)))
+        // เก็บรายการที่เคยเลือกไว้ (ถ้ายังอยู่ในผลลัพธ์ใหม่) + เพิ่ม ticket ที่ผ่าน validation ใหม่โดยอัตโนมัติ
+        setSelected(prev => {
+          const freshKeys = new Set(data.tickets.map(t => t.key))
+          const keptSelection = isRefresh
+            ? new Set(Array.from(prev).filter(k => freshKeys.has(k)))
+            : new Set<string>()
+          data.tickets.filter(t => t.valid).forEach(t => keptSelection.add(t.key))
+          return keptSelection
+        })
         setLoadState({ state: 'ready' })
       })
       .catch(e => {
         const msg = e?.response?.data?.message ?? 'โหลดข้อมูลไม่สำเร็จ'
-        setLoadState({ state: 'error', message: msg })
+        if (isRefresh) alert(`รีเฟรชจาก Jira ไม่สำเร็จ — ${msg}`)
+        else setLoadState({ state: 'error', message: msg })
       })
+      .finally(() => {
+        if (isRefresh) setRefreshing(false)
+      })
+  }
+
+  useEffect(() => {
+    loadFromJira(false)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [jql])
 
   // ── Dropdown option pools, derived from the fetched data ──────
@@ -298,6 +320,17 @@ function ValidateScreenInner() {
             </div>
           </div>
           <div className="flex items-center gap-2">
+            <button
+              onClick={() => loadFromJira(true)}
+              disabled={refreshing}
+              title="ดึงข้อมูลล่าสุดจาก Jira มาอัปเดตตารางนี้ (แทนที่การแก้ไข manual ที่ยังไม่ได้บันทึก)"
+              className="flex items-center gap-1.5 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-1.5 text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 disabled:opacity-50 transition-colors"
+            >
+              <svg className={`h-3.5 w-3.5 ${refreshing ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" />
+              </svg>
+              {refreshing ? 'กำลังรีเฟรช...' : 'รีเฟรชจาก Jira'}
+            </button>
             <ThemeToggle />
             <LogoutButton />
           </div>
