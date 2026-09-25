@@ -31,6 +31,9 @@ router.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
       'Recurring Issue Category':   t.recurringCategory,
       'Standalone Category':        t.standaloneCategory,
       'Summary':                    t.summary ?? '',
+      'Root Cause':                 t.rootCause ?? '',
+      'Resolution':                 t.resolution ?? '',
+      'Deploy Date':                t.deployDate ?? '',
     }))
 
     const csv = Papa.unparse(rows)
