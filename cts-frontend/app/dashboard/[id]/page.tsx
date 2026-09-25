@@ -907,7 +907,7 @@ export default function DashboardPage() {
           {hasActiveFilterOrSearch && <FilteredInsights tickets={filteredTickets} />}
 
           <div className="overflow-x-auto -mx-5 px-5">
-            <table className="text-sm w-full" style={{ tableLayout: 'fixed', minWidth: Object.values(colWidths).reduce((a,b)=>a+b,0) + 56 }}>
+            <table className="text-sm" style={{ tableLayout: 'auto', width: 'max-content', minWidth: '100%' }}>
               <thead>
                 <tr className="border-b border-slate-200 dark:border-slate-700">
                   <SortableHeader label="Key"        sortKey="key"          activeKey={sortKey} dir={sortDir} onSort={handleSort} onResize={handleResize} />
