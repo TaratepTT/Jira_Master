@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import api from '@/lib/api'
@@ -166,38 +166,53 @@ function MultiSelectFilter({ label, options, selected, onChange }: MultiSelectPr
   )
 }
 
-// ── Sortable column header ─────────────────────────────────────
+// ── Resizable + Sortable column header ────────────────────────
 function SortableHeader({
-  label, sortKey, activeKey, dir, onSort,
+  label, sortKey, activeKey, dir, onSort, width, onResize,
 }: {
   label: string
   sortKey: SortKey
   activeKey: SortKey | null
   dir: SortDir
   onSort: (key: SortKey) => void
+  width: number
+  onResize: (key: SortKey, w: number) => void
 }) {
   const isActive = activeKey === sortKey
+  const startX = useRef<number>(0)
+  const startW = useRef<number>(0)
+
+  const onMouseDown = (e: React.MouseEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    startX.current = e.clientX
+    startW.current = width
+    const onMove = (ev: MouseEvent) => {
+      const next = Math.max(60, startW.current + (ev.clientX - startX.current))
+      onResize(sortKey, next)
+    }
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove)
+      document.removeEventListener('mouseup', onUp)
+    }
+    document.addEventListener('mousemove', onMove)
+    document.addEventListener('mouseup', onUp)
+  }
+
   return (
-    <th
-      onClick={() => onSort(sortKey)}
-      className="text-left py-2 px-3 text-xs font-medium text-slate-500 dark:text-slate-400 cursor-pointer select-none hover:text-slate-700 dark:hover:text-slate-200 transition-colors"
-    >
-      <span className="inline-flex items-center gap-1">
+    <th style={{ width, minWidth: width }} className="relative text-left py-2 px-3 text-xs font-medium text-slate-500 dark:text-slate-400 select-none">
+      <span onClick={() => onSort(sortKey)} className="inline-flex items-center gap-1 cursor-pointer hover:text-slate-700 dark:hover:text-slate-200 transition-colors">
         {label}
         <span className="flex flex-col -space-y-1">
-          <svg
-            className={`h-2.5 w-2.5 ${isActive && dir === 'asc' ? 'text-blue-600 dark:text-blue-400' : 'text-slate-300 dark:text-slate-600'}`}
-            fill="currentColor" viewBox="0 0 20 20"
-          >
-            <path d="M10 5l5 6H5l5-6z" />
-          </svg>
-          <svg
-            className={`h-2.5 w-2.5 ${isActive && dir === 'desc' ? 'text-blue-600 dark:text-blue-400' : 'text-slate-300 dark:text-slate-600'}`}
-            fill="currentColor" viewBox="0 0 20 20"
-          >
-            <path d="M10 15l-5-6h10l-5 6z" />
-          </svg>
+          <svg className={`h-2.5 w-2.5 ${isActive && dir === 'asc' ? 'text-blue-600 dark:text-blue-400' : 'text-slate-300 dark:text-slate-600'}`} fill="currentColor" viewBox="0 0 20 20"><path d="M10 5l5 6H5l5-6z" /></svg>
+          <svg className={`h-2.5 w-2.5 ${isActive && dir === 'desc' ? 'text-blue-600 dark:text-blue-400' : 'text-slate-300 dark:text-slate-600'}`} fill="currentColor" viewBox="0 0 20 20"><path d="M10 15l-5-6h10l-5 6z" /></svg>
         </span>
+      </span>
+      <span
+        onMouseDown={onMouseDown}
+        className="absolute right-0 top-0 h-full w-2 cursor-col-resize flex items-center justify-center group z-10"
+      >
+        <span className="w-px h-4 bg-slate-300 dark:bg-slate-600 group-hover:bg-blue-400 dark:group-hover:bg-blue-500 transition-colors" />
       </span>
     </th>
   )
@@ -418,6 +433,22 @@ export default function DashboardPage() {
   // ── Sort state ────────────────────────────────────────────
   const [sortKey, setSortKey] = useState<SortKey | null>(null)
   const [sortDir, setSortDir] = useState<SortDir>('asc')
+
+  // ── Column widths (resizable) ─────────────────────────────
+  const [colWidths, setColWidths] = useState<Record<SortKey, number>>({
+    key:          100,
+    summary:      200,
+    businessUnit: 130,
+    status:       110,
+    typeOfIssue:  140,
+    rootCause:    200,
+    resolution:   200,
+    deployDate:   110,
+  })
+
+  const handleResize = useCallback((key: SortKey, w: number) => {
+    setColWidths(prev => ({ ...prev, [key]: Math.max(60, w) }))
+  }, [])
 
   useEffect(() => {
     if (!id) return
@@ -879,18 +910,18 @@ export default function DashboardPage() {
           {hasActiveFilterOrSearch && <FilteredInsights tickets={filteredTickets} />}
 
           <div className="overflow-x-auto -mx-5 px-5">
-            <table className="w-full text-sm min-w-[900px]">
+            <table className="table-fixed text-sm" style={{ minWidth: Object.values(colWidths).reduce((a,b)=>a+b,0) + 80 }}>
               <thead>
                 <tr className="border-b border-slate-200 dark:border-slate-700">
-                  <SortableHeader label="Key"        sortKey="key"          activeKey={sortKey} dir={sortDir} onSort={handleSort} />
-                  <SortableHeader label="Summary"    sortKey="summary"      activeKey={sortKey} dir={sortDir} onSort={handleSort} />
-                  <SortableHeader label="BU"         sortKey="businessUnit" activeKey={sortKey} dir={sortDir} onSort={handleSort} />
-                  <SortableHeader label="Status"     sortKey="status"       activeKey={sortKey} dir={sortDir} onSort={handleSort} />
-                  <SortableHeader label="Category"   sortKey="typeOfIssue"  activeKey={sortKey} dir={sortDir} onSort={handleSort} />
-                  <SortableHeader label="Root Cause" sortKey="rootCause"    activeKey={sortKey} dir={sortDir} onSort={handleSort} />
-                  <SortableHeader label="Resolution" sortKey="resolution"   activeKey={sortKey} dir={sortDir} onSort={handleSort} />
-                  <SortableHeader label="Deploy"     sortKey="deployDate"   activeKey={sortKey} dir={sortDir} onSort={handleSort} />
-                  <th className="text-center py-2 px-3 text-xs font-medium text-slate-500 dark:text-slate-400">เลือก</th>
+                  <SortableHeader label="Key"        sortKey="key"          activeKey={sortKey} dir={sortDir} onSort={handleSort} width={colWidths.key}          onResize={handleResize} />
+                  <SortableHeader label="Summary"    sortKey="summary"      activeKey={sortKey} dir={sortDir} onSort={handleSort} width={colWidths.summary}      onResize={handleResize} />
+                  <SortableHeader label="BU"         sortKey="businessUnit" activeKey={sortKey} dir={sortDir} onSort={handleSort} width={colWidths.businessUnit} onResize={handleResize} />
+                  <SortableHeader label="Status"     sortKey="status"       activeKey={sortKey} dir={sortDir} onSort={handleSort} width={colWidths.status}       onResize={handleResize} />
+                  <SortableHeader label="Category"   sortKey="typeOfIssue"  activeKey={sortKey} dir={sortDir} onSort={handleSort} width={colWidths.typeOfIssue}  onResize={handleResize} />
+                  <SortableHeader label="Root Cause" sortKey="rootCause"    activeKey={sortKey} dir={sortDir} onSort={handleSort} width={colWidths.rootCause}    onResize={handleResize} />
+                  <SortableHeader label="Resolution" sortKey="resolution"   activeKey={sortKey} dir={sortDir} onSort={handleSort} width={colWidths.resolution}   onResize={handleResize} />
+                  <SortableHeader label="Deploy"     sortKey="deployDate"   activeKey={sortKey} dir={sortDir} onSort={handleSort} width={colWidths.deployDate}   onResize={handleResize} />
+                  <th className="text-center py-2 px-3 text-xs font-medium text-slate-500 dark:text-slate-400 w-14">เลือก</th>
                 </tr>
               </thead>
               <tbody>
@@ -914,14 +945,14 @@ export default function DashboardPage() {
                         </svg>
                       </a>
                     </td>
-                    <td className="py-2 px-3 text-slate-700 dark:text-slate-200 max-w-[160px] truncate">{t.summary || '—'}</td>
-                    <td className="py-2 px-3 text-slate-600 dark:text-slate-300 max-w-[120px] truncate">{t.businessUnit || '—'}</td>
+                    <td className="py-2 px-3 text-slate-700 dark:text-slate-200 overflow-hidden"><span className="block truncate" title={t.summary || ''}>{t.summary || '—'}</span></td>
+                    <td className="py-2 px-3 text-slate-600 dark:text-slate-300 overflow-hidden"><span className="block truncate" title={t.businessUnit || ''}>{t.businessUnit || '—'}</span></td>
                     <td className="py-2 px-3">
                       <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium whitespace-nowrap ${statusBadge(t.status)}`}>{t.status}</span>
                     </td>
-                    <td className="py-2 px-3 text-slate-600 dark:text-slate-300 max-w-[140px] truncate">{t.typeOfIssue || <span className="text-slate-300 dark:text-slate-600">—</span>}</td>
-                    <td className="py-2 px-3 text-slate-600 dark:text-slate-300 max-w-[180px] truncate">{t.rootCause || <span className="text-slate-300 dark:text-slate-600">—</span>}</td>
-                    <td className="py-2 px-3 text-slate-600 dark:text-slate-300 max-w-[180px] truncate">{t.resolution || <span className="text-slate-300 dark:text-slate-600">—</span>}</td>
+                    <td className="py-2 px-3 text-slate-600 dark:text-slate-300 overflow-hidden"><span className="block truncate" title={t.typeOfIssue || ''}>{t.typeOfIssue || <span className="text-slate-300 dark:text-slate-600">—</span>}</span></td>
+                    <td className="py-2 px-3 text-slate-600 dark:text-slate-300 overflow-hidden"><span className="block truncate" title={t.rootCause || ''}>{t.rootCause || <span className="text-slate-300 dark:text-slate-600">—</span>}</span></td>
+                    <td className="py-2 px-3 text-slate-600 dark:text-slate-300 overflow-hidden"><span className="block truncate" title={t.resolution || ''}>{t.resolution || <span className="text-slate-300 dark:text-slate-600">—</span>}</span></td>
                     <td className="py-2 px-3 whitespace-nowrap">
                       {t.deployDate ? (
                         <span className="inline-flex items-center gap-1 text-xs font-medium text-indigo-600 dark:text-indigo-400">
