@@ -442,7 +442,7 @@ function ValidateScreenInner() {
                       <EditableSelect value={t.status} options={statusOptions} onSave={v => editField(t.key, 'status', v)} />
                     </td>
                     <td className="py-2 px-3 text-slate-600 dark:text-slate-300">
-                      <EditableText value={t.typeOfIssue ?? ''} onSave={v => editField(t.key, 'typeOfIssue', v)} placeholder="ไม่มี Category" />
+                      <EditableSelect value={t.typeOfIssue} options={typeOfIssueOptions} onSave={v => editField(t.key, 'typeOfIssue', v)} placeholder="ไม่มี Category" />
                     </td>
                     <td className="py-2 px-3 text-slate-600 dark:text-slate-300">
                       <EditableText value={t.rootCause ?? ''} onSave={v => editField(t.key, 'rootCause', v)} placeholder="ไม่มีข้อมูล" multiline />
