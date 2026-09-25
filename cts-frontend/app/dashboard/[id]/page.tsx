@@ -448,6 +448,30 @@ export default function DashboardPage() {
     setColWidths(prev => ({ ...prev, [key]: w }))
   }, [])
 
+  const [refreshingJira, setRefreshingJira] = useState(false)
+  const [refreshMsg, setRefreshMsg] = useState<string | null>(null)
+
+  const handleRefreshFromJira = async () => {
+    if (!id) return
+    setRefreshingJira(true)
+    setRefreshMsg(null)
+    try {
+      const r = await api.post(`/api/reports/${id}/refresh`)
+      const { updatedCount, notFoundInJira, ...payload } = r.data as ReportData & { updatedCount: number; notFoundInJira: number }
+      setData(payload)
+      setRefreshMsg(
+        notFoundInJira > 0
+          ? `อัปเดตแล้ว ${updatedCount} tickets — ไม่พบ ${notFoundInJira} tickets ใน Jira`
+          : `อัปเดตข้อมูลจาก Jira แล้ว ${updatedCount} tickets`
+      )
+    } catch (e: any) {
+      setRefreshMsg(e?.response?.data?.message ?? 'รีเฟรชจาก Jira ไม่สำเร็จ')
+    } finally {
+      setRefreshingJira(false)
+      setTimeout(() => setRefreshMsg(null), 5000)
+    }
+  }
+
   useEffect(() => {
     if (!id) return
     api.get(`/api/reports/${id}`)
@@ -632,6 +656,17 @@ export default function DashboardPage() {
             <ThemeToggle />
             <LogoutButton />
             <button
+              onClick={handleRefreshFromJira}
+              disabled={refreshingJira}
+              title="ดึงข้อมูลล่าสุดของทุก ticket ใน report นี้จาก Jira มาอัปเดต"
+              className="flex items-center gap-1.5 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-1.5 text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 disabled:opacity-50 transition-colors"
+            >
+              <svg className={`h-3.5 w-3.5 ${refreshingJira ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" />
+              </svg>
+              {refreshingJira ? 'กำลังรีเฟรช...' : 'รีเฟรชจาก Jira'}
+            </button>
+            <button
               onClick={handleExportCsv}
               disabled={exportingCsv}
               className="flex items-center gap-1.5 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-1.5 text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 disabled:opacity-50 transition-colors"
@@ -649,6 +684,14 @@ export default function DashboardPage() {
           </div>
         </div>
       </header>
+
+      {refreshMsg && (
+        <div className="mx-auto max-w-6xl px-4 sm:px-6 pt-4">
+          <div className="rounded-xl border border-blue-200 dark:border-blue-900/50 bg-blue-50 dark:bg-blue-950/20 px-4 py-2.5 text-sm text-blue-700 dark:text-blue-300">
+            {refreshMsg}
+          </div>
+        </div>
+      )}
 
       <main className="mx-auto max-w-6xl px-4 sm:px-6 py-8 space-y-8">
 

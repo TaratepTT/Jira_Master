@@ -1,43 +1,29 @@
 import { Router, Request, Response, NextFunction } from 'express'
 import prisma from '../lib/prisma.js'
+import { fetchJiraIssues } from '../lib/jira.js'
 
 const router = Router()
 
-// ── GET /api/reports  ─────────────────────────────────────────
-router.get('/', async (_req: Request, res: Response, next: NextFunction) => {
-  try {
-    const reports = await prisma.report.findMany({
-      orderBy: { createdAt: 'desc' },
-      select: {
-        id:           true,
-        name:         true,
-        totalTickets: true,
-        createdAt:    true,
-      },
-    })
+// ── Shared helpers ───────────────────────────────────────────
+function normaliseSystem(raw: string): string {
+  const u = raw.toUpperCase()
+  if (u.includes('CMP')) return 'CMP'
+  if (u.includes('VMP')) return 'VMP'
+  if (u.includes('TMS'))  return 'CP TMS'
+  return raw
+}
 
-    res.json(reports)
-  } catch (err) {
-    next(err)
-  }
-})
+// Build the full dashboard payload (tickets + aggregations) for one report.
+// Shared by GET /:id and POST /:id/refresh so both return the exact same shape.
+async function buildReportPayload(id: string) {
+  const report = await prisma.report.findUnique({
+    where: { id },
+    include: { tickets: true },
+  })
 
-// ── GET /api/reports/:id  ─────────────────────────────────────
-router.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const { id } = req.params
+  if (!report) return null
 
-    const report = await prisma.report.findUnique({
-      where: { id },
-      include: { tickets: true },
-    })
-
-    if (!report) {
-      res.status(404).json({ message: 'ไม่พบ report นี้' })
-      return
-    }
-
-    const tickets = report.tickets
+  const tickets = report.tickets
 
     const systemCount     = groupCount(tickets, 'system')
     const statusCount     = groupCount(tickets, 'status')
@@ -103,7 +89,7 @@ router.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
         t.status.toLowerCase().includes('investigate')
     )
 
-    res.json({
+    return {
       id:           report.id,
       name:         report.name,
       totalTickets: report.totalTickets,
@@ -142,6 +128,80 @@ router.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
         top5Bu:  Object.entries(buCount).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([name, count]) => ({ name, count })),
         top3Cat: frequencyTable.slice(0, 3),
       },
+    }
+}
+
+// ── GET /api/reports/:id  ─────────────────────────────────────
+router.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const payload = await buildReportPayload(req.params.id)
+    if (!payload) {
+      res.status(404).json({ message: 'ไม่พบ report นี้' })
+      return
+    }
+    res.json(payload)
+  } catch (err) {
+    next(err)
+  }
+})
+
+// ── POST /api/reports/:id/refresh ───────────────────────────────
+// Re-fetch the latest data from Jira for every ticket key already saved
+// in this report, and overwrite the stored fields with the fresh values.
+// Lets the person pull in edits made directly in Jira after the report
+// was created, without recreating the whole report from scratch.
+router.post('/:id/refresh', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { id } = req.params
+
+    const report = await prisma.report.findUnique({
+      where: { id },
+      include: { tickets: { select: { key: true } } },
+    })
+
+    if (!report) {
+      res.status(404).json({ message: 'ไม่พบ report นี้' })
+      return
+    }
+
+    const keys = report.tickets.map((t) => t.key)
+
+    if (!keys.length) {
+      const payload = await buildReportPayload(id)
+      res.json({ updatedCount: 0, notFoundInJira: 0, ...payload })
+      return
+    }
+
+    // Jira JQL "in" clause — keys are Jira issue keys already stored in our DB,
+    // not free user text, so no quoting/escaping is needed here.
+    const jql = `key in (${keys.join(',')})`
+    const issues = await fetchJiraIssues(jql, keys.length)
+
+    let updatedCount = 0
+    for (const i of issues) {
+      const result = await prisma.ticket.updateMany({
+        where: { reportId: id, key: i.key },
+        data: {
+          system:             normaliseSystem(i.system),
+          status:             i.status,
+          businessUnit:       i.businessUnit,
+          typeOfIssue:        i.typeOfIssue,
+          recurringCategory:  i.issueCategory || null,
+          standaloneCategory: i.typeOfSystem || null,
+          summary:            i.summary || null,
+          rootCause:          i.rootCause || null,
+          resolution:         i.resolution || null,
+          deployDate:         i.deployDate || null,
+        },
+      })
+      updatedCount += result.count
+    }
+
+    const payload = await buildReportPayload(id)
+    res.json({
+      updatedCount,
+      notFoundInJira: keys.length - issues.length,
+      ...payload,
     })
   } catch (err) {
     next(err)
