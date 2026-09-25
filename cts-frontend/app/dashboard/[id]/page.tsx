@@ -310,7 +310,17 @@ function TicketDetailModal({ ticket, onClose }: { ticket: TicketDetail; onClose:
         <div className="flex items-start justify-between mb-4">
           <div>
             <p className="text-xs text-slate-400">Ticket</p>
-            <p className="text-lg font-semibold text-blue-600 dark:text-blue-400">{ticket.key}</p>
+            <a
+              href={`https://ascendcommerce-support.atlassian.net/browse/${ticket.key}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-lg font-semibold text-blue-600 dark:text-blue-400 hover:underline inline-flex items-center gap-1.5"
+            >
+              {ticket.key}
+              <svg className="h-4 w-4 opacity-60" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
+              </svg>
+            </a>
           </div>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200">
             <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -753,14 +763,31 @@ export default function DashboardPage() {
                 </thead>
                 <tbody>
                   {data.tickets.filter(t => highlighted.has(t.key)).map(t => (
-                    <tr key={t.key} className="border-b border-slate-100 dark:border-slate-700/50 hover:bg-blue-50 dark:hover:bg-blue-950/20">
-                      <td className="py-2 px-3 font-medium text-blue-600 dark:text-blue-400 whitespace-nowrap">{t.key}</td>
-                      <td className="py-2 px-3 text-slate-700 dark:text-slate-200 max-w-[240px] truncate">{t.summary || '—'}</td>
+                    <tr
+                      key={t.key}
+                      onClick={() => setSelectedTicket(t)}
+                      className="border-b border-slate-100 dark:border-slate-700/50 hover:bg-blue-50 dark:hover:bg-blue-950/20 cursor-pointer"
+                    >
+                      <td className="py-2 px-3 font-medium whitespace-nowrap">
+                        <a
+                          href={`https://ascendcommerce-support.atlassian.net/browse/${t.key}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          onClick={(e) => e.stopPropagation()}
+                          className="text-blue-600 dark:text-blue-400 hover:underline inline-flex items-center gap-1"
+                        >
+                          {t.key}
+                          <svg className="h-3 w-3 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
+                          </svg>
+                        </a>
+                      </td>
+                      <td className="py-2 px-3 text-slate-700 dark:text-slate-200 whitespace-normal break-words min-w-[200px] max-w-[400px]">{t.summary || '—'}</td>
                       <td className="py-2 px-3">
                         <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium whitespace-nowrap ${statusBadge(t.status)}`}>{t.status}</span>
                       </td>
                       <td className="py-2 px-3 text-slate-600 dark:text-slate-300">{t.typeOfIssue || '—'}</td>
-                      <td className="py-2 px-3 text-center">
+                      <td className="py-2 px-3 text-center" onClick={(e) => e.stopPropagation()}>
                         <button onClick={() => toggleHighlight(t.key)} className="text-slate-400 hover:text-red-500 transition-colors">
                           <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
