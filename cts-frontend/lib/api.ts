@@ -149,4 +149,31 @@ export async function downloadTicketAttachment(reportId: string, key: string, at
   window.URL.revokeObjectURL(url)
 }
 
+// Fetches attachment as a blob URL for inline preview.
+// Caller must call window.URL.revokeObjectURL(url) when done to avoid memory leaks.
+export async function fetchAttachmentBlobUrl(
+  reportId: string,
+  key: string,
+  attachmentId: string
+): Promise<string> {
+  const response = await api.get(
+    `/api/reports/${reportId}/tickets/${key}/attachments/${attachmentId}`,
+    { responseType: 'blob' }
+  )
+  return window.URL.createObjectURL(new Blob([response.data]))
+}
+
+// Fetches attachment as plain text for txt / csv / json / xml preview.
+export async function fetchAttachmentText(
+  reportId: string,
+  key: string,
+  attachmentId: string
+): Promise<string> {
+  const response = await api.get(
+    `/api/reports/${reportId}/tickets/${key}/attachments/${attachmentId}`,
+    { responseType: 'text' }
+  )
+  return response.data as string
+}
+
 export default api

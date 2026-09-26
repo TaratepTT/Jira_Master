@@ -6,7 +6,7 @@ import Link from 'next/link'
 import api from '@/lib/api'
 import { updateTicket } from '@/lib/api'
 import { getTicketActivity, addTicketComment, type TicketComment, type TicketChangelogEntry } from '@/lib/api'
-import { getTicketAttachments, downloadTicketAttachment, type TicketAttachment } from '@/lib/api'
+import { getTicketAttachments, downloadTicketAttachment, fetchAttachmentBlobUrl, fetchAttachmentText, type TicketAttachment } from '@/lib/api'
 import ThemeToggle from '@/components/theme/ThemeToggle'
 import ExpandableKeys from '@/components/dashboard/ExpandableKeys'
 import LogoutButton from '@/components/auth/LogoutButton'
@@ -314,7 +314,7 @@ function FilteredInsights({ tickets }: { tickets: TicketDetail[] }) {
 }
 
 // ── Ticket Detail Modal (editable — syncs back to Jira) ────────
-// ── Ticket Activity Panel (Comments + Changelog) ────────────────
+// ── Ticket Activity Panel (Comments + Changelog + Files) ────────
 function formatActivityDate(iso: string): string {
   const d = new Date(iso)
   if (isNaN(d.getTime())) return iso
@@ -335,6 +335,15 @@ function attachmentIcon(mimeType: string): string {
   return '📎'
 }
 
+function getPreviewType(mimeType: string, filename: string): 'image' | 'pdf' | 'text' | 'office' | 'none' {
+  if (mimeType.startsWith('image/')) return 'image'
+  if (mimeType.includes('pdf')) return 'pdf'
+  const ext = filename.split('.').pop()?.toLowerCase() ?? ''
+  if (['txt', 'csv', 'json', 'xml', 'log', 'md'].includes(ext)) return 'text'
+  if (['xlsx', 'xls', 'docx', 'doc', 'pptx', 'ppt'].includes(ext)) return 'office'
+  return 'none'
+}
+
 function TicketActivityPanel({ reportId, ticketKey }: { reportId: string; ticketKey: string }) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -345,6 +354,12 @@ function TicketActivityPanel({ reportId, ticketKey }: { reportId: string; ticket
   const [newComment, setNewComment] = useState('')
   const [posting, setPosting] = useState(false)
   const [downloadingId, setDownloadingId] = useState<string | null>(null)
+  // ── Preview state ─────────────────────────────────────────────
+  const [previewId, setPreviewId] = useState<string | null>(null)
+  const [previewBlobUrl, setPreviewBlobUrl] = useState<string | null>(null)
+  const [previewText, setPreviewText] = useState<string | null>(null)
+  const [previewLoading, setPreviewLoading] = useState(false)
+  const prevBlobRef = useRef<string | null>(null)
 
   useEffect(() => {
     setLoading(true)
@@ -361,6 +376,13 @@ function TicketActivityPanel({ reportId, ticketKey }: { reportId: string; ticket
       .catch(() => setError('โหลดประวัติไม่สำเร็จ'))
       .finally(() => setLoading(false))
   }, [reportId, ticketKey])
+
+  // Revoke blob URL on unmount to avoid memory leaks
+  useEffect(() => {
+    return () => {
+      if (prevBlobRef.current) window.URL.revokeObjectURL(prevBlobRef.current)
+    }
+  }, [])
 
   const handlePostComment = async () => {
     if (!newComment.trim()) return
@@ -385,6 +407,97 @@ function TicketActivityPanel({ reportId, ticketKey }: { reportId: string; ticket
     } finally {
       setDownloadingId(null)
     }
+  }
+
+  const handleTogglePreview = async (a: TicketAttachment) => {
+    // Close preview if already open
+    if (previewId === a.id) {
+      setPreviewId(null)
+      setPreviewBlobUrl(null)
+      setPreviewText(null)
+      if (prevBlobRef.current) {
+        window.URL.revokeObjectURL(prevBlobRef.current)
+        prevBlobRef.current = null
+      }
+      return
+    }
+
+    setPreviewId(a.id)
+    setPreviewBlobUrl(null)
+    setPreviewText(null)
+    setPreviewLoading(true)
+
+    try {
+      const type = getPreviewType(a.mimeType, a.filename)
+      if (type === 'text') {
+        const text = await fetchAttachmentText(reportId, ticketKey, a.id)
+        setPreviewText(text)
+      } else if (type === 'image' || type === 'pdf') {
+        const url = await fetchAttachmentBlobUrl(reportId, ticketKey, a.id)
+        if (prevBlobRef.current) window.URL.revokeObjectURL(prevBlobRef.current)
+        prevBlobRef.current = url
+        setPreviewBlobUrl(url)
+      } else if (type === 'office') {
+        // Office files require a public URL for external viewers — fall back to download
+        setPreviewText('__office__')
+      } else {
+        // Unknown type — just download
+        await handleDownload(a)
+        setPreviewId(null)
+      }
+    } catch {
+      setError('โหลด preview ไม่สำเร็จ')
+      setPreviewId(null)
+    } finally {
+      setPreviewLoading(false)
+    }
+  }
+
+  const renderPreview = (a: TicketAttachment) => {
+    if (previewId !== a.id) return null
+    const type = getPreviewType(a.mimeType, a.filename)
+
+    return (
+      <div className="mt-2 rounded-lg overflow-hidden border border-slate-200 dark:border-slate-600 bg-slate-50 dark:bg-slate-900">
+        {previewLoading ? (
+          <div className="flex items-center justify-center h-40">
+            <svg className="h-5 w-5 animate-spin text-blue-500" fill="none" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+            </svg>
+          </div>
+        ) : type === 'image' && previewBlobUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={previewBlobUrl}
+            alt={a.filename}
+            className="max-w-full max-h-96 object-contain mx-auto block p-2"
+          />
+        ) : type === 'pdf' && previewBlobUrl ? (
+          <iframe
+            src={previewBlobUrl}
+            title={a.filename}
+            className="w-full h-96 border-0"
+          />
+        ) : type === 'text' && previewText ? (
+          <pre className="text-[11px] text-slate-700 dark:text-slate-300 p-3 overflow-auto max-h-64 whitespace-pre-wrap break-words font-mono">
+            {previewText.slice(0, 20000)}{previewText.length > 20000 ? '\n\n… (ตัดข้อความที่เกิน 20,000 ตัวอักษร)' : ''}
+          </pre>
+        ) : type === 'office' && previewText === '__office__' ? (
+          <div className="flex flex-col items-center justify-center h-36 gap-2 text-slate-400 text-xs">
+            <span className="text-3xl">{attachmentIcon(a.mimeType)}</span>
+            <p>ไม่สามารถ preview ไฟล์ Office ได้โดยตรง</p>
+            <button
+              onClick={() => handleDownload(a)}
+              disabled={downloadingId === a.id}
+              className="rounded-lg border border-slate-300 dark:border-slate-600 px-3 py-1 text-[11px] font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-600 disabled:opacity-40 transition-colors"
+            >
+              {downloadingId === a.id ? '...' : 'ดาวน์โหลดแทน'}
+            </button>
+          </div>
+        ) : null}
+      </div>
+    )
   }
 
   return (
@@ -422,7 +535,7 @@ function TicketActivityPanel({ reportId, ticketKey }: { reportId: string; ticket
         </button>
       </div>
 
-      <div className="p-3 max-h-64 overflow-y-auto space-y-3">
+      <div className="p-3 max-h-[32rem] overflow-y-auto space-y-3">
         {loading ? (
           <div className="space-y-2">
             {[1, 2].map(i => <div key={i} className="h-10 rounded-lg bg-slate-100 dark:bg-slate-700 animate-pulse" />)}
@@ -462,25 +575,44 @@ function TicketActivityPanel({ reportId, ticketKey }: { reportId: string; ticket
             ))
           )
         ) : (
+          // ── Files / Attachments tab ────────────────────────────
           attachments.length === 0 ? (
             <p className="text-xs text-slate-400 text-center py-4">ไม่มีไฟล์แนบ</p>
           ) : (
             attachments.map(a => (
-              <div key={a.id} className="flex items-center justify-between gap-2 rounded-lg bg-slate-50 dark:bg-slate-700/50 p-2.5">
-                <div className="flex items-center gap-2 min-w-0">
-                  <span className="text-lg flex-shrink-0">{attachmentIcon(a.mimeType)}</span>
-                  <div className="min-w-0">
-                    <p className="text-xs font-medium text-slate-700 dark:text-slate-200 truncate">{a.filename}</p>
-                    <p className="text-[11px] text-slate-400">{formatFileSize(a.size)} · {a.author} · {formatActivityDate(a.created)}</p>
+              <div key={a.id}>
+                <div className="flex items-center justify-between gap-2 rounded-lg bg-slate-50 dark:bg-slate-700/50 p-2.5">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="text-lg flex-shrink-0">{attachmentIcon(a.mimeType)}</span>
+                    <div className="min-w-0">
+                      <p className="text-xs font-medium text-slate-700 dark:text-slate-200 truncate">{a.filename}</p>
+                      <p className="text-[11px] text-slate-400">{formatFileSize(a.size)} · {a.author} · {formatActivityDate(a.created)}</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1.5 flex-shrink-0">
+                    {/* Preview toggle */}
+                    <button
+                      onClick={() => handleTogglePreview(a)}
+                      disabled={previewLoading && previewId === a.id}
+                      className={`rounded-lg border px-2 py-1 text-[11px] font-medium transition-colors disabled:opacity-40 ${
+                        previewId === a.id
+                          ? 'border-blue-400 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'
+                          : 'border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-600'
+                      }`}
+                    >
+                      {previewLoading && previewId === a.id ? '...' : previewId === a.id ? 'ปิด' : 'ดู'}
+                    </button>
+                    {/* Download */}
+                    <button
+                      onClick={() => handleDownload(a)}
+                      disabled={downloadingId === a.id}
+                      className="rounded-lg border border-slate-300 dark:border-slate-600 px-2 py-1 text-[11px] font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-600 disabled:opacity-40 transition-colors"
+                    >
+                      {downloadingId === a.id ? '...' : '⬇'}
+                    </button>
                   </div>
                 </div>
-                <button
-                  onClick={() => handleDownload(a)}
-                  disabled={downloadingId === a.id}
-                  className="flex-shrink-0 rounded-lg border border-slate-300 dark:border-slate-600 px-2 py-1 text-[11px] font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-600 disabled:opacity-40 transition-colors"
-                >
-                  {downloadingId === a.id ? '...' : 'ดาวน์โหลด'}
-                </button>
+                {renderPreview(a)}
               </div>
             ))
           )
