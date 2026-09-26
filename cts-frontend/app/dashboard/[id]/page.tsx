@@ -360,6 +360,8 @@ function TicketActivityPanel({ reportId, ticketKey }: { reportId: string; ticket
   const [previewText, setPreviewText] = useState<string | null>(null)
   const [previewLoading, setPreviewLoading] = useState(false)
   const prevBlobRef = useRef<string | null>(null)
+  // ── Lightbox state ────────────────────────────────────────────
+  const [lightboxUrl, setLightboxUrl] = useState<string | null>(null)
 
   useEffect(() => {
     setLoading(true)
@@ -471,7 +473,8 @@ function TicketActivityPanel({ reportId, ticketKey }: { reportId: string; ticket
           <img
             src={previewBlobUrl}
             alt={a.filename}
-            className="max-w-full max-h-96 object-contain mx-auto block p-2"
+            onClick={() => setLightboxUrl(previewBlobUrl)}
+            className="max-w-full max-h-96 object-contain mx-auto block p-2 cursor-zoom-in hover:opacity-90 transition-opacity"
           />
         ) : type === 'pdf' && previewBlobUrl ? (
           <iframe
@@ -501,6 +504,30 @@ function TicketActivityPanel({ reportId, ticketKey }: { reportId: string; ticket
   }
 
   return (
+    <>
+    {/* ── Lightbox overlay ───────────────────────────────────────── */}
+    {lightboxUrl && (
+      <div
+        className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 p-4"
+        onClick={() => setLightboxUrl(null)}
+      >
+        <button
+          onClick={() => setLightboxUrl(null)}
+          className="absolute top-4 right-4 text-white/70 hover:text-white transition-colors"
+        >
+          <svg className="h-8 w-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={lightboxUrl}
+          alt="preview"
+          onClick={(e) => e.stopPropagation()}
+          className="max-w-full max-h-full object-contain rounded-lg shadow-2xl"
+        />
+      </div>
+    )}
     <div className="rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden">
       <div className="flex border-b border-slate-200 dark:border-slate-700">
         <button
@@ -640,6 +667,7 @@ function TicketActivityPanel({ reportId, ticketKey }: { reportId: string; ticket
         </div>
       )}
     </div>
+    </>
   )
 }
 
