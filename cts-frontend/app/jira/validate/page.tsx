@@ -5,7 +5,6 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import api from '@/lib/api'
 import ThemeToggle from '@/components/theme/ThemeToggle'
-import LogoutButton from '@/components/auth/LogoutButton'
 
 interface PreviewTicket {
   key: string
@@ -19,6 +18,9 @@ interface PreviewTicket {
   rootCause?: string
   resolution?: string
   deployDate?: string
+  assignee?: string
+  priority?: string
+  suggestedCategory?: string | null
   problems: string[]
   valid: boolean
 }
@@ -153,45 +155,23 @@ function ValidateScreenInner() {
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [viewFilter, setViewFilter] = useState<ViewFilter>('all')
   const [search, setSearch] = useState('')
-  const [refreshing, setRefreshing] = useState(false)
 
-  // ── Pull latest data straight from Jira (used on mount + refresh button) ──
-  const loadFromJira = (isRefresh = false) => {
+  useEffect(() => {
     if (!jql) {
       setLoadState({ state: 'error', message: 'ไม่พบ JQL — กลับไปตั้งค่าที่หน้า Jira Sync' })
       return
     }
-    if (isRefresh) setRefreshing(true)
-    else setLoadState({ state: 'loading' })
-
     api.post('/api/jira/preview-all', { jql })
       .then(r => {
         const data = r.data as { tickets: PreviewTicket[] }
         setTickets(data.tickets)
-        // เก็บรายการที่เคยเลือกไว้ (ถ้ายังอยู่ในผลลัพธ์ใหม่) + เพิ่ม ticket ที่ผ่าน validation ใหม่โดยอัตโนมัติ
-        setSelected(prev => {
-          const freshKeys = new Set(data.tickets.map(t => t.key))
-          const keptSelection = isRefresh
-            ? new Set(Array.from(prev).filter(k => freshKeys.has(k)))
-            : new Set<string>()
-          data.tickets.filter(t => t.valid).forEach(t => keptSelection.add(t.key))
-          return keptSelection
-        })
+        setSelected(new Set(data.tickets.filter(t => t.valid).map(t => t.key)))
         setLoadState({ state: 'ready' })
       })
       .catch(e => {
         const msg = e?.response?.data?.message ?? 'โหลดข้อมูลไม่สำเร็จ'
-        if (isRefresh) alert(`รีเฟรชจาก Jira ไม่สำเร็จ — ${msg}`)
-        else setLoadState({ state: 'error', message: msg })
+        setLoadState({ state: 'error', message: msg })
       })
-      .finally(() => {
-        if (isRefresh) setRefreshing(false)
-      })
-  }
-
-  useEffect(() => {
-    loadFromJira(false)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [jql])
 
   // ── Dropdown option pools, derived from the fetched data ──────
@@ -272,7 +252,7 @@ function ValidateScreenInner() {
     try {
       const { data } = await api.post('/api/jira/confirm', {
         reportName,
-        tickets: chosen.map(({ problems, valid, ...rest }) => rest),
+        tickets: chosen.map(({ problems, valid, suggestedCategory, ...rest }) => rest),
       })
       router.push(`/dashboard/${data.reportId}`)
     } catch (e: unknown) {
@@ -319,21 +299,7 @@ function ValidateScreenInner() {
               <p className="text-xs text-slate-400 dark:text-slate-500">{reportName}</p>
             </div>
           </div>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => loadFromJira(true)}
-              disabled={refreshing}
-              title="ดึงข้อมูลล่าสุดจาก Jira มาอัปเดตตารางนี้ (แทนที่การแก้ไข manual ที่ยังไม่ได้บันทึก)"
-              className="flex items-center gap-1.5 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-1.5 text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 disabled:opacity-50 transition-colors"
-            >
-              <svg className={`h-3.5 w-3.5 ${refreshing ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" />
-              </svg>
-              {refreshing ? 'กำลังรีเฟรช...' : 'รีเฟรชจาก Jira'}
-            </button>
-            <ThemeToggle />
-            <LogoutButton />
-          </div>
+          <ThemeToggle />
         </div>
       </header>
 
@@ -452,19 +418,7 @@ function ValidateScreenInner() {
                         className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
                       />
                     </td>
-                    <td className="py-2 px-3 font-medium whitespace-nowrap">
-                      <a
-                        href={`https://ascendcommerce-support.atlassian.net/browse/${t.key}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-blue-600 dark:text-blue-400 hover:underline inline-flex items-center gap-1"
-                      >
-                        {t.key}
-                        <svg className="h-3 w-3 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
-                        </svg>
-                      </a>
-                    </td>
+                    <td className="py-2 px-3 font-medium text-blue-600 dark:text-blue-400 whitespace-nowrap">{t.key}</td>
                     <td className="py-2 px-3 text-slate-700 dark:text-slate-200">
                       <EditableText value={t.summary ?? ''} onSave={v => editField(t.key, 'summary', v)} placeholder="ไม่มี summary" />
                     </td>
@@ -475,7 +429,18 @@ function ValidateScreenInner() {
                       <EditableSelect value={t.status} options={statusOptions} onSave={v => editField(t.key, 'status', v)} />
                     </td>
                     <td className="py-2 px-3 text-slate-600 dark:text-slate-300">
-                      <EditableSelect value={t.typeOfIssue} options={typeOfIssueOptions} onSave={v => editField(t.key, 'typeOfIssue', v)} placeholder="ไม่มี Category" />
+                      <EditableSelect value={t.typeOfIssue} options={typeOfIssueOptions} onSave={v => editField(t.key, 'typeOfIssue', v)} />
+                      {!t.typeOfIssue && t.suggestedCategory && (
+                        <button
+                          onClick={() => editField(t.key, 'typeOfIssue', t.suggestedCategory!)}
+                          className="mt-1 flex items-center gap-1 text-[10px] font-medium text-purple-600 dark:text-purple-400 hover:underline"
+                        >
+                          <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" />
+                          </svg>
+                          แนะนำ: {t.suggestedCategory}
+                        </button>
+                      )}
                     </td>
                     <td className="py-2 px-3 text-slate-600 dark:text-slate-300">
                       <EditableText value={t.rootCause ?? ''} onSave={v => editField(t.key, 'rootCause', v)} placeholder="ไม่มีข้อมูล" multiline />

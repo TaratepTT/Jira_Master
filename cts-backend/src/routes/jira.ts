@@ -21,9 +21,32 @@ function validateIssue(i: JiraIssue): string[] {
   if (!i.businessUnit)              problems.push('ไม่มี Business Unit')
   if (!i.typeOfIssue)               problems.push('ไม่มี Type of Issue')
   if (!i.system)                    problems.push('ไม่มี System')
-  if (!i.rootCause)                 problems.push('ไม่มี Root Cause')
-  if (!i.resolution)                problems.push('ไม่มี Resolution')
   return problems
+}
+
+// ══════════════════════════════════════════════════════════════
+// ── AUTO-CATEGORIZE — suggest Type of Issue from keywords ───────
+// ══════════════════════════════════════════════════════════════
+// Simple keyword → category matching, checked against the Summary text.
+// Only used to SUGGEST a value when Type of Issue is empty — never
+// overrides a value that already exists in Jira.
+const CATEGORY_KEYWORDS: Array<{ category: string; keywords: string[] }> = [
+  { category: 'Human Error',   keywords: ['กรอกผิด', 'พิมพ์ผิด', 'human error', 'ใส่ผิด', 'เลือกผิด'] },
+  { category: 'Data Issue',    keywords: ['ข้อมูลผิด', 'ข้อมูลไม่ตรง', 'data', 'ข้อมูลซ้ำ', 'ข้อมูลหาย'] },
+  { category: 'User request',  keywords: ['ขอ', 'ร้องขอ', 'request', 'อยากให้', 'ต้องการ'] },
+  { category: 'App issue',     keywords: ['เข้าไม่ได้', 'login', 'timeout', 'error', 'bug', 'ค้าง', 'ล่ม', 'ไม่ทำงาน'] },
+  { category: 'Non-app issue', keywords: ['gps', 'เครื่องพิมพ์', 'printer', 'network', 'เน็ต', 'สัญญาณ'] },
+]
+
+function suggestCategory(summary: string): string | null {
+  if (!summary) return null
+  const lower = summary.toLowerCase()
+  for (const { category, keywords } of CATEGORY_KEYWORDS) {
+    if (keywords.some(kw => lower.includes(kw.toLowerCase()))) {
+      return category
+    }
+  }
+  return null
 }
 
 // ── GET /api/jira/test ────────────────────────────────────────
@@ -75,8 +98,12 @@ router.post('/preview-all', async (req: Request, res: Response, next: NextFuncti
         rootCause:          i.rootCause,
         resolution:         i.resolution,
         deployDate:         i.deployDate,
+        assignee:           i.assignee,
+        priority:           i.priority,
         problems,
         valid: problems.length === 0,
+        // Only suggest when Type of Issue is genuinely empty
+        suggestedCategory: !i.typeOfIssue ? suggestCategory(i.summary) : null,
       }
     })
 
@@ -104,6 +131,7 @@ router.post('/confirm', async (req: Request, res: Response, next: NextFunction) 
         key: string; system: string; status: string; businessUnit: string
         typeOfIssue: string; recurringCategory?: string; standaloneCategory?: string
         summary?: string; rootCause?: string; resolution?: string; deployDate?: string
+        assignee?: string; priority?: string
       }>
     }
 
@@ -132,6 +160,8 @@ router.post('/confirm', async (req: Request, res: Response, next: NextFunction) 
               rootCause:          t.rootCause || null,
               resolution:         t.resolution || null,
               deployDate:         t.deployDate || null,
+              assignee:           t.assignee || null,
+              priority:           t.priority || null,
             })),
           },
         },
@@ -184,6 +214,8 @@ router.post('/sync', async (req: Request, res: Response, next: NextFunction) => 
               rootCause:          i.rootCause || null,
               resolution:         i.resolution || null,
               deployDate:         i.deployDate || null,
+              assignee:           i.assignee || null,
+              priority:           i.priority || null,
             })),
           },
         },

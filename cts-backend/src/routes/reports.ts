@@ -105,13 +105,22 @@ router.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
         t.status.toLowerCase().includes('investigate')
     )
 
+    const assigneeCount = groupCount(tickets, 'assignee')
+    const topAssignees = Object.entries(assigneeCount)
+      .filter(([name]) => name && name !== 'Unknown' && name !== 'null')
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 8)
+      .map(([name, count]) => ({ name, count }))
+
+    const priorityCount = groupCount(tickets, 'priority')
+
     res.json({
       id:           report.id,
       name:         report.name,
       totalTickets: report.totalTickets,
       createdAt:    report.createdAt,
 
-      // raw tickets — includes rootCause, resolution, deployDate
+      // raw tickets — includes rootCause, resolution, deployDate, assignee, priority
       tickets: tickets.map((t) => ({
         key:                t.key,
         system:             t.system,
@@ -124,6 +133,8 @@ router.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
         rootCause:          t.rootCause,
         resolution:         t.resolution,
         deployDate:         t.deployDate,
+        assignee:           t.assignee,
+        priority:           t.priority,
       })),
 
       aggregations: {
@@ -143,6 +154,8 @@ router.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
         })),
         top5Bu:  Object.entries(buCount).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([name, count]) => ({ name, count })),
         top3Cat: frequencyTable.slice(0, 3),
+        topAssignees,
+        priorityCount,
       },
     })
   } catch (err) {

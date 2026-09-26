@@ -34,6 +34,8 @@ model Ticket {
   rootCause          String? @map("root_cause")
   resolution         String? @map("resolution")
   deployDate         String? @map("deploy_date")
+  assignee           String? @map("assignee")
+  priority           String? @map("priority")
 
   report Report @relation(fields: [reportId], references: [id], onDelete: Cascade)
 

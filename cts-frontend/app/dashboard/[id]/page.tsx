@@ -26,6 +26,8 @@ interface TicketDetail {
   rootCause?: string
   resolution?: string
   deployDate?: string
+  assignee?: string
+  priority?: string
 }
 interface Aggregations {
   systemCount: Record<string, number>
@@ -36,6 +38,8 @@ interface Aggregations {
   top5Bu: BuTop[]
   top3Cat: FreqRow[]
   l3Tickets: L3Ticket[]
+  topAssignees: Array<{ name: string; count: number }>
+  priorityCount: Record<string, number>
 }
 interface ReportData {
   id: string; name: string; totalTickets: number; createdAt: string
@@ -999,6 +1003,31 @@ export default function DashboardPage() {
             <p className="text-xs text-slate-400 mb-4">Top 3 category: {ag.top3Cat.map(c => c.category).join(', ')}</p>
             {catEntries.map(([c, n]) => <ProgressBar key={c} label={c} count={n} total={totalTickets} color="bg-teal-500" />)}
             <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 mt-3 pt-3 border-t border-slate-100 dark:border-slate-700">รวมทั้งหมด: {totalTickets} tickets</p>
+          </div>
+        </div>
+
+        {/* Row 3: Assignee + Priority */}
+        <div className="grid gap-5 lg:grid-cols-2">
+          <div className="rounded-2xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 p-5">
+            <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-200 mb-1">Assignee Breakdown</h2>
+            <p className="text-xs text-slate-400 mb-4">ใครรับผิดชอบ ticket มากที่สุด</p>
+            {ag.topAssignees.length === 0 ? (
+              <p className="text-sm text-slate-400 py-4 text-center">ไม่มีข้อมูล assignee</p>
+            ) : (
+              ag.topAssignees.map(a => (
+                <ProgressBar key={a.name} label={a.name} count={a.count} total={totalTickets} color="bg-indigo-400" />
+              ))
+            )}
+          </div>
+          <div className="rounded-2xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 p-5">
+            <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-200 mb-4">Priority Breakdown</h2>
+            {Object.keys(ag.priorityCount).length === 0 ? (
+              <p className="text-sm text-slate-400 py-4 text-center">ไม่มีข้อมูล priority</p>
+            ) : (
+              Object.entries(ag.priorityCount).sort((a, b) => b[1] - a[1]).map(([p, c]) => (
+                <ProgressBar key={p} label={p} count={c} total={totalTickets} color="bg-rose-400" />
+              ))
+            )}
           </div>
         </div>
 
