@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import api from '@/lib/api'
@@ -175,19 +175,20 @@ function MultiSelectFilter({ label, options, selected, onChange }: MultiSelectPr
 
 // ── Sortable column header ─────────────────────────────────────
 function SortableHeader({
-  label, sortKey, activeKey, dir, onSort,
+  label, sortKey, activeKey, dir, onSort, onResizeStart,
 }: {
   label: string
   sortKey: SortKey
   activeKey: SortKey | null
   dir: SortDir
   onSort: (key: SortKey) => void
+  onResizeStart?: (e: React.MouseEvent) => void
 }) {
   const isActive = activeKey === sortKey
   return (
     <th
       onClick={() => onSort(sortKey)}
-      className="text-left py-2 px-3 text-xs font-medium text-slate-500 dark:text-slate-400 cursor-pointer select-none hover:text-slate-700 dark:hover:text-slate-200 transition-colors"
+      className="relative text-left py-2 px-3 text-xs font-medium text-slate-500 dark:text-slate-400 cursor-pointer select-none hover:text-slate-700 dark:hover:text-slate-200 transition-colors"
     >
       <span className="inline-flex items-center gap-1">
         {label}
@@ -206,6 +207,13 @@ function SortableHeader({
           </svg>
         </span>
       </span>
+      {onResizeStart && (
+        <div
+          onMouseDown={onResizeStart}
+          onClick={(e) => e.stopPropagation()}
+          className="absolute top-0 right-0 h-full w-2 cursor-col-resize hover:bg-blue-400/50 active:bg-blue-500/70 z-10"
+        />
+      )}
     </th>
   )
 }
@@ -797,6 +805,35 @@ export default function DashboardPage() {
   const [sortKey, setSortKey] = useState<SortKey | null>(null)
   const [sortDir, setSortDir] = useState<SortDir>('asc')
 
+  // ── Resizable columns for the Issue Detail table ────────────
+  const [colWidths, setColWidths] = useState<Record<string, number>>({
+    key: 110, summary: 220, businessUnit: 130, status: 120,
+    typeOfIssue: 130, rootCause: 220, resolution: 220, deployDate: 110,
+  })
+  const resizingRef = useRef<{ col: string; startX: number; startWidth: number } | null>(null)
+
+  const onResizeMove = useCallback((e: MouseEvent) => {
+    const r = resizingRef.current
+    if (!r) return
+    const delta = e.clientX - r.startX
+    setColWidths(prev => ({ ...prev, [r.col]: Math.max(70, r.startWidth + delta) }))
+  }, [])
+
+  const onResizeEnd = useCallback(() => {
+    resizingRef.current = null
+    document.removeEventListener('mousemove', onResizeMove)
+    document.removeEventListener('mouseup', onResizeEnd)
+  }, [onResizeMove])
+
+  const startResize = useCallback((col: string) => (e: React.MouseEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    resizingRef.current = { col, startX: e.clientX, startWidth: colWidths[col] }
+    document.addEventListener('mousemove', onResizeMove)
+    document.addEventListener('mouseup', onResizeEnd)
+  }, [colWidths, onResizeMove, onResizeEnd])
+
+
   useEffect(() => {
     if (!id) return
     api.get(`/api/reports/${id}`)
@@ -1282,17 +1319,28 @@ export default function DashboardPage() {
           {hasActiveFilterOrSearch && <FilteredInsights tickets={filteredTickets} />}
 
           <div className="overflow-x-auto -mx-5 px-5">
-            <table className="w-full text-sm min-w-[900px]">
+            <table className="text-sm" style={{ tableLayout: 'fixed', width: Object.values(colWidths).reduce((a, b) => a + b, 0) + 60 }}>
+              <colgroup>
+                <col style={{ width: colWidths.key }} />
+                <col style={{ width: colWidths.summary }} />
+                <col style={{ width: colWidths.businessUnit }} />
+                <col style={{ width: colWidths.status }} />
+                <col style={{ width: colWidths.typeOfIssue }} />
+                <col style={{ width: colWidths.rootCause }} />
+                <col style={{ width: colWidths.resolution }} />
+                <col style={{ width: colWidths.deployDate }} />
+                <col style={{ width: 50 }} />
+              </colgroup>
               <thead>
                 <tr className="border-b border-slate-200 dark:border-slate-700">
-                  <SortableHeader label="Key"        sortKey="key"          activeKey={sortKey} dir={sortDir} onSort={handleSort} />
-                  <SortableHeader label="Summary"    sortKey="summary"      activeKey={sortKey} dir={sortDir} onSort={handleSort} />
-                  <SortableHeader label="BU"         sortKey="businessUnit" activeKey={sortKey} dir={sortDir} onSort={handleSort} />
-                  <SortableHeader label="Status"     sortKey="status"       activeKey={sortKey} dir={sortDir} onSort={handleSort} />
-                  <SortableHeader label="Category"   sortKey="typeOfIssue"  activeKey={sortKey} dir={sortDir} onSort={handleSort} />
-                  <SortableHeader label="Root Cause" sortKey="rootCause"    activeKey={sortKey} dir={sortDir} onSort={handleSort} />
-                  <SortableHeader label="Resolution" sortKey="resolution"   activeKey={sortKey} dir={sortDir} onSort={handleSort} />
-                  <SortableHeader label="Deploy"     sortKey="deployDate"   activeKey={sortKey} dir={sortDir} onSort={handleSort} />
+                  <SortableHeader label="Key"        sortKey="key"          activeKey={sortKey} dir={sortDir} onSort={handleSort} onResizeStart={startResize('key')} />
+                  <SortableHeader label="Summary"    sortKey="summary"      activeKey={sortKey} dir={sortDir} onSort={handleSort} onResizeStart={startResize('summary')} />
+                  <SortableHeader label="BU"         sortKey="businessUnit" activeKey={sortKey} dir={sortDir} onSort={handleSort} onResizeStart={startResize('businessUnit')} />
+                  <SortableHeader label="Status"     sortKey="status"       activeKey={sortKey} dir={sortDir} onSort={handleSort} onResizeStart={startResize('status')} />
+                  <SortableHeader label="Category"   sortKey="typeOfIssue"  activeKey={sortKey} dir={sortDir} onSort={handleSort} onResizeStart={startResize('typeOfIssue')} />
+                  <SortableHeader label="Root Cause" sortKey="rootCause"    activeKey={sortKey} dir={sortDir} onSort={handleSort} onResizeStart={startResize('rootCause')} />
+                  <SortableHeader label="Resolution" sortKey="resolution"   activeKey={sortKey} dir={sortDir} onSort={handleSort} onResizeStart={startResize('resolution')} />
+                  <SortableHeader label="Deploy"     sortKey="deployDate"   activeKey={sortKey} dir={sortDir} onSort={handleSort} onResizeStart={startResize('deployDate')} />
                   <th className="text-center py-2 px-3 text-xs font-medium text-slate-500 dark:text-slate-400">เลือก</th>
                 </tr>
               </thead>
@@ -1317,14 +1365,14 @@ export default function DashboardPage() {
                         </svg>
                       </a>
                     </td>
-                    <td className="py-2 px-3 text-slate-700 dark:text-slate-200 whitespace-normal break-words min-w-[180px] max-w-[280px]">{t.summary || '—'}</td>
-                    <td className="py-2 px-3 text-slate-600 dark:text-slate-300 whitespace-normal break-words min-w-[100px] max-w-[160px]">{t.businessUnit || '—'}</td>
+                    <td className="py-2 px-3 text-slate-700 dark:text-slate-200 whitespace-normal break-words overflow-hidden">{t.summary || '—'}</td>
+                    <td className="py-2 px-3 text-slate-600 dark:text-slate-300 whitespace-normal break-words overflow-hidden">{t.businessUnit || '—'}</td>
                     <td className="py-2 px-3">
                       <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium whitespace-nowrap ${statusBadge(t.status)}`}>{t.status}</span>
                     </td>
-                    <td className="py-2 px-3 text-slate-600 dark:text-slate-300 whitespace-normal break-words min-w-[120px] max-w-[180px]">{t.typeOfIssue || <span className="text-slate-300 dark:text-slate-600">—</span>}</td>
-                    <td className="py-2 px-3 text-slate-600 dark:text-slate-300 whitespace-normal break-words min-w-[160px] max-w-[260px]">{t.rootCause || <span className="text-slate-300 dark:text-slate-600">—</span>}</td>
-                    <td className="py-2 px-3 text-slate-600 dark:text-slate-300 whitespace-normal break-words min-w-[160px] max-w-[260px]">{t.resolution || <span className="text-slate-300 dark:text-slate-600">—</span>}</td>
+                    <td className="py-2 px-3 text-slate-600 dark:text-slate-300 whitespace-normal break-words overflow-hidden">{t.typeOfIssue || <span className="text-slate-300 dark:text-slate-600">—</span>}</td>
+                    <td className="py-2 px-3 text-slate-600 dark:text-slate-300 whitespace-normal break-words overflow-hidden">{t.rootCause || <span className="text-slate-300 dark:text-slate-600">—</span>}</td>
+                    <td className="py-2 px-3 text-slate-600 dark:text-slate-300 whitespace-normal break-words overflow-hidden">{t.resolution || <span className="text-slate-300 dark:text-slate-600">—</span>}</td>
                     <td className="py-2 px-3 whitespace-nowrap">
                       {t.deployDate ? (
                         <span className="inline-flex items-center gap-1 text-xs font-medium text-indigo-600 dark:text-indigo-400">
