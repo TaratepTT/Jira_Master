@@ -136,6 +136,7 @@ router.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
         deployDate:         t.deployDate,
         assignee:           t.assignee,
         priority:           t.priority,
+        ticketCreatedAt:    t.ticketCreatedAt?.toISOString() ?? null,
       })),
 
       aggregations: {

@@ -30,6 +30,7 @@ interface TicketDetail {
   deployDate?: string
   assignee?: string
   priority?: string
+  ticketCreatedAt?: string | null
 }
 interface Aggregations {
   systemCount: Record<string, number>
