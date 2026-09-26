@@ -1351,7 +1351,7 @@ export default function DashboardPage() {
                     onClick={() => setSelectedTicket(t)}
                     className="border-b border-slate-100 dark:border-slate-700/50 hover:bg-blue-50 dark:hover:bg-blue-950/20 cursor-pointer transition-colors align-top"
                   >
-                    <td className="py-2 px-3 font-medium whitespace-nowrap">
+                    <td className="py-2 px-3 font-medium whitespace-nowrap overflow-hidden">
                       <a
                         href={`https://ascendcommerce-support.atlassian.net/browse/${t.key}`}
                         target="_blank"
@@ -1367,13 +1367,13 @@ export default function DashboardPage() {
                     </td>
                     <td className="py-2 px-3 text-slate-700 dark:text-slate-200 whitespace-normal break-words overflow-hidden">{t.summary || '—'}</td>
                     <td className="py-2 px-3 text-slate-600 dark:text-slate-300 whitespace-normal break-words overflow-hidden">{t.businessUnit || '—'}</td>
-                    <td className="py-2 px-3">
-                      <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium whitespace-nowrap ${statusBadge(t.status)}`}>{t.status}</span>
+                    <td className="py-2 px-3 overflow-hidden">
+                      <span className={`inline-block max-w-full truncate align-middle px-2 py-0.5 rounded-full text-xs font-medium ${statusBadge(t.status)}`}>{t.status}</span>
                     </td>
                     <td className="py-2 px-3 text-slate-600 dark:text-slate-300 whitespace-normal break-words overflow-hidden">{t.typeOfIssue || <span className="text-slate-300 dark:text-slate-600">—</span>}</td>
                     <td className="py-2 px-3 text-slate-600 dark:text-slate-300 whitespace-normal break-words overflow-hidden">{t.rootCause || <span className="text-slate-300 dark:text-slate-600">—</span>}</td>
                     <td className="py-2 px-3 text-slate-600 dark:text-slate-300 whitespace-normal break-words overflow-hidden">{t.resolution || <span className="text-slate-300 dark:text-slate-600">—</span>}</td>
-                    <td className="py-2 px-3 whitespace-nowrap">
+                    <td className="py-2 px-3 whitespace-nowrap overflow-hidden">
                       {t.deployDate ? (
                         <span className="inline-flex items-center gap-1 text-xs font-medium text-indigo-600 dark:text-indigo-400">
                           <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
