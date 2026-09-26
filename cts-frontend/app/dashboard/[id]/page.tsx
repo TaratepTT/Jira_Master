@@ -7,7 +7,6 @@ import api from '@/lib/api'
 import { updateTicket } from '@/lib/api'
 import { getTicketActivity, addTicketComment, type TicketComment, type TicketChangelogEntry } from '@/lib/api'
 import { getTicketAttachments, downloadTicketAttachment, type TicketAttachment } from '@/lib/api'
-import { notifySlaBreaches } from '@/lib/api'
 import ThemeToggle from '@/components/theme/ThemeToggle'
 import ExpandableKeys from '@/components/dashboard/ExpandableKeys'
 import LogoutButton from '@/components/auth/LogoutButton'
@@ -30,14 +29,6 @@ interface TicketDetail {
   deployDate?: string
   assignee?: string
   priority?: string
-  createdDate?: string
-}
-interface SlaBreach {
-  key: string
-  summary: string
-  daysOverdue: number
-  priority: string
-  assignee: string
 }
 interface Aggregations {
   systemCount: Record<string, number>
@@ -50,7 +41,6 @@ interface Aggregations {
   l3Tickets: L3Ticket[]
   topAssignees: Array<{ name: string; count: number }>
   priorityCount: Record<string, number>
-  slaBreaches: SlaBreach[]
 }
 interface ReportData {
   id: string; name: string; totalTickets: number; createdAt: string
@@ -948,72 +938,6 @@ export default function DashboardPage() {
     }
   }
 
-  // ── SLA: notify Google Chat ────────────────────────────────
-  const [notifyingSla, setNotifyingSla] = useState(false)
-  const [slaNotifyResult, setSlaNotifyResult] = useState<{ sent: boolean; message: string } | null>(null)
-
-  const handleNotifySla = async () => {
-    if (!id) return
-    setNotifyingSla(true)
-    setSlaNotifyResult(null)
-    try {
-      const result = await notifySlaBreaches(id as string)
-      setSlaNotifyResult(result)
-    } catch {
-      setSlaNotifyResult({ sent: false, message: 'ส่งแจ้งเตือนไม่สำเร็จ' })
-    } finally {
-      setNotifyingSla(false)
-    }
-  }
-
-  // ── SLA: export .ics calendar reminders ────────────────────
-  const handleExportIcs = () => {
-    if (!data) return
-    const breaches = data.aggregations.slaBreaches
-    if (!breaches.length) {
-      alert('ไม่มี ticket เกิน SLA ให้สร้างการแจ้งเตือน')
-      return
-    }
-
-    const toIcsDate = (d: Date) =>
-      d.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z'
-
-    const now = new Date()
-    const events = breaches.map(b => {
-      const uid = `sla-${b.key}-${now.getTime()}@cts-report`
-      const start = new Date(now.getTime() + 60 * 60 * 1000) // reminder 1hr from now
-      const end = new Date(start.getTime() + 30 * 60 * 1000)
-      return [
-        'BEGIN:VEVENT',
-        `UID:${uid}`,
-        `DTSTAMP:${toIcsDate(now)}`,
-        `DTSTART:${toIcsDate(start)}`,
-        `DTEND:${toIcsDate(end)}`,
-        `SUMMARY:[SLA เกิน ${b.daysOverdue} วัน] ${b.key} — ${b.summary}`,
-        `DESCRIPTION:Priority: ${b.priority}\\nAssignee: ${b.assignee || 'ไม่มีผู้รับผิดชอบ'}\\nhttps://ascendcommerce-support.atlassian.net/browse/${b.key}`,
-        'END:VEVENT',
-      ].join('\r\n')
-    })
-
-    const icsContent = [
-      'BEGIN:VCALENDAR',
-      'VERSION:2.0',
-      'PRODID:-//CTS Report Dashboard//SLA Alerts//EN',
-      ...events,
-      'END:VCALENDAR',
-    ].join('\r\n')
-
-    const blob = new Blob([icsContent], { type: 'text/calendar;charset=utf-8' })
-    const url = window.URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    link.href = url
-    link.setAttribute('download', `sla-reminders-${data.name}.ics`)
-    document.body.appendChild(link)
-    link.click()
-    link.remove()
-    window.URL.revokeObjectURL(url)
-  }
-
   if (error) return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-900 flex items-center justify-center">
       <div className="text-center space-y-3">
@@ -1172,68 +1096,6 @@ export default function DashboardPage() {
             )}
           </div>
         </div>
-
-        {/* SLA Alert Panel */}
-        {ag.slaBreaches.length > 0 && (
-          <div className="rounded-2xl border border-orange-200 dark:border-orange-900/50 bg-orange-50 dark:bg-orange-950/20 p-5">
-            <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
-              <h2 className="text-sm font-semibold text-orange-800 dark:text-orange-300">
-                ⚠ SLA Alert — {ag.slaBreaches.length} tickets เกินกำหนด
-              </h2>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={handleExportIcs}
-                  className="flex items-center gap-1.5 rounded-lg border border-orange-300 dark:border-orange-800 bg-white dark:bg-slate-800 px-3 py-1.5 text-xs font-medium text-orange-700 dark:text-orange-400 hover:bg-orange-100 dark:hover:bg-orange-900/30 transition-colors"
-                >
-                  <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5" />
-                  </svg>
-                  Export .ics
-                </button>
-                <button
-                  onClick={handleNotifySla}
-                  disabled={notifyingSla}
-                  className="flex items-center gap-1.5 rounded-lg bg-orange-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-orange-700 disabled:opacity-50 transition-colors"
-                >
-                  {notifyingSla ? 'กำลังส่ง...' : 'แจ้งเตือนเข้า Google Chat'}
-                </button>
-              </div>
-            </div>
-
-            {slaNotifyResult && (
-              <div className={`mb-3 rounded-lg px-3 py-2 text-xs ${slaNotifyResult.sent ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400' : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300'}`}>
-                {slaNotifyResult.message}
-              </div>
-            )}
-
-            <div className="space-y-1.5 max-h-64 overflow-y-auto">
-              {ag.slaBreaches.slice(0, 20).map(b => (
-                <div key={b.key} className="flex items-center justify-between gap-3 rounded-lg bg-white dark:bg-slate-800 px-3 py-2">
-                  <div className="min-w-0 flex-1">
-                    <a
-                      href={`https://ascendcommerce-support.atlassian.net/browse/${b.key}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-xs font-medium text-blue-600 dark:text-blue-400 hover:underline"
-                    >
-                      {b.key}
-                    </a>
-                    <span className="text-xs text-slate-600 dark:text-slate-300 ml-2 truncate">{b.summary}</span>
-                  </div>
-                  <div className="flex items-center gap-2 flex-shrink-0 text-xs">
-                    <span className="text-slate-400">{b.assignee || 'ไม่มีผู้รับผิดชอบ'}</span>
-                    <span className="rounded-full bg-red-100 dark:bg-red-900/40 text-red-600 dark:text-red-400 px-2 py-0.5 font-medium whitespace-nowrap">
-                      เกิน {b.daysOverdue} วัน
-                    </span>
-                  </div>
-                </div>
-              ))}
-              {ag.slaBreaches.length > 20 && (
-                <p className="text-xs text-orange-600 dark:text-orange-400 text-center pt-1">และอีก {ag.slaBreaches.length - 20} รายการ</p>
-              )}
-            </div>
-          </div>
-        )}
 
         {/* Frequency Table */}
         <div className="rounded-2xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 p-5">
