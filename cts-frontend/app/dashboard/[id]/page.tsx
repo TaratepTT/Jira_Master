@@ -10,6 +10,7 @@ import { getTicketAttachments, downloadTicketAttachment, type TicketAttachment }
 import ThemeToggle from '@/components/theme/ThemeToggle'
 import ExpandableKeys from '@/components/dashboard/ExpandableKeys'
 import LogoutButton from '@/components/auth/LogoutButton'
+import TrendChart from '@/components/dashboard/TrendChart'
 
 // ── Types ─────────────────────────────────────────────────────
 interface FreqRow { rank: number; category: string; count: number; pct: string; keys: string[] }
@@ -1133,6 +1134,9 @@ export default function DashboardPage() {
             )}
           </div>
         </div>
+
+        {/* Trend Chart */}
+        <TrendChart tickets={data.tickets} />
 
         {/* Frequency Table */}
         <div className="rounded-2xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 p-5">
