@@ -2,6 +2,7 @@ import { Router, Request, Response, NextFunction } from 'express'
 import prisma from '../lib/prisma.js'
 import { pushTicketUpdateToJira, type JiraUpdateInput } from '../lib/jira.js'
 import { fetchJiraComments, fetchJiraChangelog, addJiraComment } from '../lib/jira.js'
+import { fetchJiraAttachments, downloadJiraAttachment } from '../lib/jira.js'
 
 const router = Router()
 
@@ -263,6 +264,47 @@ router.post('/:id/tickets/:key/comment', async (req: Request, res: Response, nex
 
     const comments = await fetchJiraComments(key)
     res.json({ message: 'เพิ่ม comment สำเร็จ', comments })
+  } catch (err) {
+    next(err)
+  }
+})
+
+// ── GET /api/reports/:id/tickets/:key/attachments ─────────────────
+// รายการไฟล์แนบทั้งหมดของ ticket
+router.get('/:id/tickets/:key/attachments', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { id, key } = req.params
+
+    const ticket = await prisma.ticket.findFirst({ where: { reportId: id, key } })
+    if (!ticket) {
+      res.status(404).json({ message: 'ไม่พบ ticket นี้ใน report' })
+      return
+    }
+
+    const attachments = await fetchJiraAttachments(key)
+    res.json({ attachments })
+  } catch (err) {
+    next(err)
+  }
+})
+
+// ── GET /api/reports/:id/tickets/:key/attachments/:attachmentId ───
+// Proxy ดาวน์โหลดไฟล์แนบจริงจาก Jira (ต้องผ่าน backend เพราะ Jira ต้องการ auth)
+router.get('/:id/tickets/:key/attachments/:attachmentId', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { id, attachmentId } = req.params
+
+    const ticket = await prisma.ticket.findFirst({ where: { reportId: id } })
+    if (!ticket) {
+      res.status(404).json({ message: 'ไม่พบ report นี้' })
+      return
+    }
+
+    const { buffer, mimeType, filename } = await downloadJiraAttachment(attachmentId)
+
+    res.setHeader('Content-Type', mimeType)
+    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(filename)}"`)
+    res.send(buffer)
   } catch (err) {
     next(err)
   }

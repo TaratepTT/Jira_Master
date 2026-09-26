@@ -6,6 +6,7 @@ import Link from 'next/link'
 import api from '@/lib/api'
 import { updateTicket } from '@/lib/api'
 import { getTicketActivity, addTicketComment, type TicketComment, type TicketChangelogEntry } from '@/lib/api'
+import { getTicketAttachments, downloadTicketAttachment, type TicketAttachment } from '@/lib/api'
 import ThemeToggle from '@/components/theme/ThemeToggle'
 import ExpandableKeys from '@/components/dashboard/ExpandableKeys'
 import LogoutButton from '@/components/auth/LogoutButton'
@@ -310,22 +311,42 @@ function formatActivityDate(iso: string): string {
   return d.toLocaleString('th-TH', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
 }
 
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
+function attachmentIcon(mimeType: string): string {
+  if (mimeType.startsWith('image/')) return '🖼️'
+  if (mimeType.includes('pdf')) return '📄'
+  if (mimeType.includes('sheet') || mimeType.includes('excel')) return '📊'
+  if (mimeType.includes('word') || mimeType.includes('document')) return '📝'
+  return '📎'
+}
+
 function TicketActivityPanel({ reportId, ticketKey }: { reportId: string; ticketKey: string }) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [comments, setComments] = useState<TicketComment[]>([])
   const [changelog, setChangelog] = useState<TicketChangelogEntry[]>([])
-  const [tab, setTab] = useState<'comments' | 'changelog'>('comments')
+  const [attachments, setAttachments] = useState<TicketAttachment[]>([])
+  const [tab, setTab] = useState<'comments' | 'changelog' | 'attachments'>('comments')
   const [newComment, setNewComment] = useState('')
   const [posting, setPosting] = useState(false)
+  const [downloadingId, setDownloadingId] = useState<string | null>(null)
 
   useEffect(() => {
     setLoading(true)
     setError('')
-    getTicketActivity(reportId, ticketKey)
-      .then(d => {
-        setComments(d.comments)
-        setChangelog(d.changelog)
+    Promise.all([
+      getTicketActivity(reportId, ticketKey),
+      getTicketAttachments(reportId, ticketKey),
+    ])
+      .then(([activity, attach]) => {
+        setComments(activity.comments)
+        setChangelog(activity.changelog)
+        setAttachments(attach.attachments)
       })
       .catch(() => setError('โหลดประวัติไม่สำเร็จ'))
       .finally(() => setLoading(false))
@@ -342,6 +363,17 @@ function TicketActivityPanel({ reportId, ticketKey }: { reportId: string; ticket
       setError('เพิ่ม comment ไม่สำเร็จ')
     } finally {
       setPosting(false)
+    }
+  }
+
+  const handleDownload = async (attachment: TicketAttachment) => {
+    setDownloadingId(attachment.id)
+    try {
+      await downloadTicketAttachment(reportId, ticketKey, attachment)
+    } catch {
+      setError('ดาวน์โหลดไฟล์ไม่สำเร็จ')
+    } finally {
+      setDownloadingId(null)
     }
   }
 
@@ -368,6 +400,16 @@ function TicketActivityPanel({ reportId, ticketKey }: { reportId: string; ticket
         >
           History {changelog.length > 0 && `(${changelog.length})`}
         </button>
+        <button
+          onClick={() => setTab('attachments')}
+          className={`flex-1 py-2 text-xs font-medium transition-colors ${
+            tab === 'attachments'
+              ? 'bg-blue-50 dark:bg-blue-950/30 text-blue-700 dark:text-blue-400'
+              : 'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700/50'
+          }`}
+        >
+          Files {attachments.length > 0 && `(${attachments.length})`}
+        </button>
       </div>
 
       <div className="p-3 max-h-64 overflow-y-auto space-y-3">
@@ -391,7 +433,7 @@ function TicketActivityPanel({ reportId, ticketKey }: { reportId: string; ticket
               </div>
             ))
           )
-        ) : (
+        ) : tab === 'changelog' ? (
           changelog.length === 0 ? (
             <p className="text-xs text-slate-400 text-center py-4">ไม่มีประวัติการเปลี่ยนแปลง</p>
           ) : (
@@ -406,6 +448,29 @@ function TicketActivityPanel({ reportId, ticketKey }: { reportId: string; ticket
                     <span className="font-medium">{c.field}</span>: {c.from} → <span className="text-blue-600 dark:text-blue-400">{c.to}</span>
                   </p>
                 ))}
+              </div>
+            ))
+          )
+        ) : (
+          attachments.length === 0 ? (
+            <p className="text-xs text-slate-400 text-center py-4">ไม่มีไฟล์แนบ</p>
+          ) : (
+            attachments.map(a => (
+              <div key={a.id} className="flex items-center justify-between gap-2 rounded-lg bg-slate-50 dark:bg-slate-700/50 p-2.5">
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className="text-lg flex-shrink-0">{attachmentIcon(a.mimeType)}</span>
+                  <div className="min-w-0">
+                    <p className="text-xs font-medium text-slate-700 dark:text-slate-200 truncate">{a.filename}</p>
+                    <p className="text-[11px] text-slate-400">{formatFileSize(a.size)} · {a.author} · {formatActivityDate(a.created)}</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => handleDownload(a)}
+                  disabled={downloadingId === a.id}
+                  className="flex-shrink-0 rounded-lg border border-slate-300 dark:border-slate-600 px-2 py-1 text-[11px] font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-600 disabled:opacity-40 transition-colors"
+                >
+                  {downloadingId === a.id ? '...' : 'ดาวน์โหลด'}
+                </button>
               </div>
             ))
           )
@@ -435,6 +500,7 @@ function TicketActivityPanel({ reportId, ticketKey }: { reportId: string; ticket
     </div>
   )
 }
+
 
 const STATUS_EDIT_OPTIONS = [
   'Closed', 'Resolved', 'CLOSING', 'Cancel',

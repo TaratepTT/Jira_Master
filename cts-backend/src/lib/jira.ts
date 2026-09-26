@@ -344,3 +344,52 @@ export async function addJiraComment(key: string, text: string): Promise<void> {
 
 export default jiraClient
 
+// ══════════════════════════════════════════════════════════════
+// ── ATTACHMENTS — list & download files attached to a ticket ───
+// ══════════════════════════════════════════════════════════════
+
+export interface JiraAttachment {
+  id:       string
+  filename: string
+  size:     number
+  mimeType: string
+  author:   string
+  created:  string
+}
+
+// ── List attachment metadata for a ticket ────────────────────────
+export async function fetchJiraAttachments(key: string): Promise<JiraAttachment[]> {
+  const { data } = await jiraClient.get(`/issue/${key}`, {
+    params: { fields: 'attachment' },
+  })
+  const attachments = (data.fields?.attachment ?? []) as Array<Record<string, unknown>>
+
+  return attachments.map(a => ({
+    id:       String(a.id ?? ''),
+    filename: String(a.filename ?? 'unnamed'),
+    size:     Number(a.size ?? 0),
+    mimeType: String(a.mimeType ?? 'application/octet-stream'),
+    author:   String((a.author as { displayName?: string })?.displayName ?? 'Unknown'),
+    created:  String(a.created ?? ''),
+  }))
+}
+
+// ── Download raw attachment bytes (proxied — Jira requires auth) ──
+export async function downloadJiraAttachment(
+  attachmentId: string
+): Promise<{ buffer: Buffer; mimeType: string; filename: string }> {
+  // First get metadata to know filename + mimeType (content endpoint doesn't return them)
+  const { data: meta } = await jiraClient.get(`/attachment/${attachmentId}`)
+
+  const { data: buffer } = await jiraClient.get(`/attachment/content/${attachmentId}`, {
+    responseType: 'arraybuffer',
+  })
+
+  return {
+    buffer:   Buffer.from(buffer as ArrayBuffer),
+    mimeType: String(meta.mimeType ?? 'application/octet-stream'),
+    filename: String(meta.filename ?? 'download'),
+  }
+}
+
+

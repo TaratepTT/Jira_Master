@@ -117,4 +117,36 @@ export async function addTicketComment(reportId: string, key: string, text: stri
   return data as { message: string; comments: TicketComment[] }
 }
 
+// ── Attachments ────────────────────────────────────────────────
+export interface TicketAttachment {
+  id: string
+  filename: string
+  size: number
+  mimeType: string
+  author: string
+  created: string
+}
+
+export async function getTicketAttachments(reportId: string, key: string) {
+  const { data } = await api.get(`/api/reports/${reportId}/tickets/${key}/attachments`)
+  return data as { attachments: TicketAttachment[] }
+}
+
+// Downloads via blob so the Authorization header (attached by the axios
+// interceptor) is sent — a plain <a href> would not include it.
+export async function downloadTicketAttachment(reportId: string, key: string, attachment: TicketAttachment) {
+  const response = await api.get(
+    `/api/reports/${reportId}/tickets/${key}/attachments/${attachment.id}`,
+    { responseType: 'blob' }
+  )
+  const url = window.URL.createObjectURL(new Blob([response.data]))
+  const link = document.createElement('a')
+  link.href = url
+  link.setAttribute('download', attachment.filename)
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  window.URL.revokeObjectURL(url)
+}
+
 export default api
