@@ -1,6 +1,7 @@
 import { Router, Request, Response, NextFunction } from 'express'
 import prisma from '../lib/prisma.js'
 import { pushTicketUpdateToJira, type JiraUpdateInput } from '../lib/jira.js'
+import { fetchJiraComments, fetchJiraChangelog, addJiraComment } from '../lib/jira.js'
 
 const router = Router()
 
@@ -199,6 +200,56 @@ router.patch('/:id/tickets/:key', async (req: Request, res: Response, next: Next
         deployDate:         updated.deployDate,
       },
     })
+  } catch (err) {
+    next(err)
+  }
+})
+
+// ── GET /api/reports/:id/tickets/:key/activity ───────────────────
+// ดึง Comments + Changelog มาพร้อมกัน แสดงใน Ticket Modal
+router.get('/:id/tickets/:key/activity', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { id, key } = req.params
+
+    const ticket = await prisma.ticket.findFirst({ where: { reportId: id, key } })
+    if (!ticket) {
+      res.status(404).json({ message: 'ไม่พบ ticket นี้ใน report' })
+      return
+    }
+
+    const [comments, changelog] = await Promise.all([
+      fetchJiraComments(key),
+      fetchJiraChangelog(key),
+    ])
+
+    res.json({ comments, changelog })
+  } catch (err) {
+    next(err)
+  }
+})
+
+// ── POST /api/reports/:id/tickets/:key/comment ────────────────────
+// เพิ่ม comment ใหม่จาก Dashboard เข้า Jira โดยตรง
+router.post('/:id/tickets/:key/comment', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { id, key } = req.params
+    const { text } = req.body as { text?: string }
+
+    if (!text || !text.trim()) {
+      res.status(400).json({ message: 'กรุณากรอกข้อความ comment' })
+      return
+    }
+
+    const ticket = await prisma.ticket.findFirst({ where: { reportId: id, key } })
+    if (!ticket) {
+      res.status(404).json({ message: 'ไม่พบ ticket นี้ใน report' })
+      return
+    }
+
+    await addJiraComment(key, text.trim())
+
+    const comments = await fetchJiraComments(key)
+    res.json({ message: 'เพิ่ม comment สำเร็จ', comments })
   } catch (err) {
     next(err)
   }

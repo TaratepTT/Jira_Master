@@ -5,6 +5,7 @@ import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import api from '@/lib/api'
 import { updateTicket } from '@/lib/api'
+import { getTicketActivity, addTicketComment, type TicketComment, type TicketChangelogEntry } from '@/lib/api'
 import ThemeToggle from '@/components/theme/ThemeToggle'
 import ExpandableKeys from '@/components/dashboard/ExpandableKeys'
 import LogoutButton from '@/components/auth/LogoutButton'
@@ -298,6 +299,139 @@ function FilteredInsights({ tickets }: { tickets: TicketDetail[] }) {
 }
 
 // ── Ticket Detail Modal (editable — syncs back to Jira) ────────
+// ── Ticket Activity Panel (Comments + Changelog) ────────────────
+function formatActivityDate(iso: string): string {
+  const d = new Date(iso)
+  if (isNaN(d.getTime())) return iso
+  return d.toLocaleString('th-TH', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+}
+
+function TicketActivityPanel({ reportId, ticketKey }: { reportId: string; ticketKey: string }) {
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const [comments, setComments] = useState<TicketComment[]>([])
+  const [changelog, setChangelog] = useState<TicketChangelogEntry[]>([])
+  const [tab, setTab] = useState<'comments' | 'changelog'>('comments')
+  const [newComment, setNewComment] = useState('')
+  const [posting, setPosting] = useState(false)
+
+  useEffect(() => {
+    setLoading(true)
+    setError('')
+    getTicketActivity(reportId, ticketKey)
+      .then(d => {
+        setComments(d.comments)
+        setChangelog(d.changelog)
+      })
+      .catch(() => setError('โหลดประวัติไม่สำเร็จ'))
+      .finally(() => setLoading(false))
+  }, [reportId, ticketKey])
+
+  const handlePostComment = async () => {
+    if (!newComment.trim()) return
+    setPosting(true)
+    try {
+      const result = await addTicketComment(reportId, ticketKey, newComment.trim())
+      setComments(result.comments)
+      setNewComment('')
+    } catch {
+      setError('เพิ่ม comment ไม่สำเร็จ')
+    } finally {
+      setPosting(false)
+    }
+  }
+
+  return (
+    <div className="rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden">
+      <div className="flex border-b border-slate-200 dark:border-slate-700">
+        <button
+          onClick={() => setTab('comments')}
+          className={`flex-1 py-2 text-xs font-medium transition-colors ${
+            tab === 'comments'
+              ? 'bg-blue-50 dark:bg-blue-950/30 text-blue-700 dark:text-blue-400'
+              : 'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700/50'
+          }`}
+        >
+          Comments {comments.length > 0 && `(${comments.length})`}
+        </button>
+        <button
+          onClick={() => setTab('changelog')}
+          className={`flex-1 py-2 text-xs font-medium transition-colors ${
+            tab === 'changelog'
+              ? 'bg-blue-50 dark:bg-blue-950/30 text-blue-700 dark:text-blue-400'
+              : 'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700/50'
+          }`}
+        >
+          History {changelog.length > 0 && `(${changelog.length})`}
+        </button>
+      </div>
+
+      <div className="p-3 max-h-64 overflow-y-auto space-y-3">
+        {loading ? (
+          <div className="space-y-2">
+            {[1, 2].map(i => <div key={i} className="h-10 rounded-lg bg-slate-100 dark:bg-slate-700 animate-pulse" />)}
+          </div>
+        ) : error ? (
+          <p className="text-xs text-red-500 text-center py-4">{error}</p>
+        ) : tab === 'comments' ? (
+          comments.length === 0 ? (
+            <p className="text-xs text-slate-400 text-center py-4">ยังไม่มี comment</p>
+          ) : (
+            comments.map(c => (
+              <div key={c.id} className="rounded-lg bg-slate-50 dark:bg-slate-700/50 p-2.5">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-xs font-medium text-slate-700 dark:text-slate-200">{c.author}</span>
+                  <span className="text-[11px] text-slate-400">{formatActivityDate(c.created)}</span>
+                </div>
+                <p className="text-xs text-slate-600 dark:text-slate-300 whitespace-pre-wrap">{c.body}</p>
+              </div>
+            ))
+          )
+        ) : (
+          changelog.length === 0 ? (
+            <p className="text-xs text-slate-400 text-center py-4">ไม่มีประวัติการเปลี่ยนแปลง</p>
+          ) : (
+            changelog.map(entry => (
+              <div key={entry.id} className="rounded-lg bg-slate-50 dark:bg-slate-700/50 p-2.5">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-xs font-medium text-slate-700 dark:text-slate-200">{entry.author}</span>
+                  <span className="text-[11px] text-slate-400">{formatActivityDate(entry.created)}</span>
+                </div>
+                {entry.changes.map((c, i) => (
+                  <p key={i} className="text-xs text-slate-600 dark:text-slate-300">
+                    <span className="font-medium">{c.field}</span>: {c.from} → <span className="text-blue-600 dark:text-blue-400">{c.to}</span>
+                  </p>
+                ))}
+              </div>
+            ))
+          )
+        )}
+      </div>
+
+      {tab === 'comments' && (
+        <div className="border-t border-slate-200 dark:border-slate-700 p-2 flex items-center gap-2">
+          <input
+            type="text"
+            value={newComment}
+            onChange={e => setNewComment(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && handlePostComment()}
+            placeholder="เพิ่ม comment..."
+            disabled={posting}
+            className="flex-1 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 px-2.5 py-1.5 text-xs text-slate-700 dark:text-slate-200 outline-none focus:border-blue-500"
+          />
+          <button
+            onClick={handlePostComment}
+            disabled={posting || !newComment.trim()}
+            className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-40 transition-colors"
+          >
+            {posting ? '...' : 'ส่ง'}
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
 const STATUS_EDIT_OPTIONS = [
   'Closed', 'Resolved', 'CLOSING', 'Cancel',
   'L1-In progress', 'L2-Acknowledge', 'L2-IN PROGRESS',
@@ -526,6 +660,8 @@ function TicketDetailModal({
               </p>
             )}
           </div>
+
+          <TicketActivityPanel reportId={reportId} ticketKey={ticket.key} />
 
           {error && (
             <div className="rounded-lg bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900/50 px-3 py-2">

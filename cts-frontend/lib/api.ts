@@ -92,4 +92,29 @@ export async function updateTicket(reportId: string, key: string, input: TicketU
   }
 }
 
+// ── Ticket activity: comments + changelog ─────────────────────
+export interface TicketComment {
+  id: string
+  author: string
+  body: string
+  created: string
+}
+
+export interface TicketChangelogEntry {
+  id: string
+  author: string
+  created: string
+  changes: Array<{ field: string; from: string; to: string }>
+}
+
+export async function getTicketActivity(reportId: string, key: string) {
+  const { data } = await api.get(`/api/reports/${reportId}/tickets/${key}/activity`)
+  return data as { comments: TicketComment[]; changelog: TicketChangelogEntry[] }
+}
+
+export async function addTicketComment(reportId: string, key: string, text: string) {
+  const { data } = await api.post(`/api/reports/${reportId}/tickets/${key}/comment`, { text })
+  return data as { message: string; comments: TicketComment[] }
+}
+
 export default api
