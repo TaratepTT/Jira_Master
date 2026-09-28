@@ -3,12 +3,12 @@
 import { useAuth } from '@/components/auth/AuthContext'
 
 export default function LogoutButton() {
-  const { logout, username } = useAuth()
+  const { logout, user } = useAuth()
 
   return (
     <button
       onClick={() => { if (confirm('ออกจากระบบ?')) logout() }}
-      title={username ? `Logout (${username})` : 'Logout'}
+      title={user ? `${user.name} (${user.role}) — ออกจากระบบ` : 'ออกจากระบบ'}
       className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-500 dark:text-slate-300 hover:bg-red-50 dark:hover:bg-red-950/30 hover:text-red-500 dark:hover:text-red-400 transition-colors"
     >
       <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">

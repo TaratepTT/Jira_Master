@@ -6,6 +6,7 @@ import Link from 'next/link'
 import api from '@/lib/api'
 import ThemeToggle from '@/components/theme/ThemeToggle'
 import LogoutButton from '@/components/auth/LogoutButton'
+import { useAuth } from '@/components/auth/AuthContext'
 
 type TestState =
   | { state: 'idle' }
@@ -33,6 +34,7 @@ const JQL_EXAMPLES = [
 
 export default function JiraSyncPage() {
   const router = useRouter()
+  const { canEdit } = useAuth()
   const [jql, setJql]               = useState(PRESET_JQL[0].jql)
   const [reportName, setReportName]  = useState(`Jira Sync — ${new Date().toLocaleDateString('th-TH', { day: 'numeric', month: 'long', year: 'numeric' })}`)
   const [testState, setTestState]    = useState<TestState>({ state: 'idle' })
@@ -103,6 +105,14 @@ export default function JiraSyncPage() {
       </header>
 
       <main className="mx-auto max-w-3xl px-4 sm:px-6 py-8 space-y-6">
+
+        {!canEdit && (
+          <div className="rounded-xl border border-orange-200 dark:border-orange-900/50 bg-orange-50 dark:bg-orange-950/20 px-5 py-3">
+            <p className="text-sm text-orange-800 dark:text-orange-300">
+              บัญชีของคุณเป็นสิทธิ์ <strong>ดูอย่างเดียว (Viewer)</strong> จึง sync จาก Jira ไม่ได้ — ขอสิทธิ์ Editor จากผู้ดูแลระบบ
+            </p>
+          </div>
+        )}
 
         {/* Title */}
         <div>
@@ -250,7 +260,7 @@ export default function JiraSyncPage() {
         {/* Continue button */}
         <button
           onClick={goToValidate}
-          disabled={!jql.trim()}
+          disabled={!jql.trim() || !canEdit}
           className="w-full rounded-xl bg-blue-600 py-3 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
         >
           ดึงข้อมูลมาตรวจสอบ

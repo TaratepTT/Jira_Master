@@ -7,13 +7,14 @@ import compression from 'compression'
 import rateLimit from 'express-rate-limit'
 
 import authRouter    from './routes/auth.js'
+import adminRouter   from './routes/admin.js'
 import uploadRouter  from './routes/upload.js'
 import reportsRouter from './routes/reports.js'
 import exportRouter  from './routes/export.js'
 import healthRouter  from './routes/health.js'
 import jiraRouter    from './routes/jira.js'
 import { errorHandler } from './middleware/errorHandler.js'
-import { requireAuth } from './middleware/requireAuth.js'
+import { requireAuth, requireRole } from './middleware/requireAuth.js'
 
 // ── App ───────────────────────────────────────────────────────
 const app = express()
@@ -51,10 +52,10 @@ app.use(cors(corsOptions))
 // ── Body parsers ──────────────────────────────────────────────
 // "Confirm sync" posts every selected ticket (incl. long Root Cause / Resolution text)
 // in one request, which can be many MB — far above the 1 MB default. Give ONLY that
-// route a bigger limit, and check the login token BEFORE reading the body so an
-// anonymous client can't make the server buffer huge payloads. (Must come before the
+// route a bigger limit, and check login + role BEFORE reading the body so an
+// anonymous / read-only client can't make the server buffer huge payloads. (Must come before the
 // global parser below, which skips bodies that were already parsed.)
-app.use('/api/jira/confirm', requireAuth, express.json({ limit: '25mb' }))
+app.use('/api/jira/confirm', requireAuth, requireRole('editor', 'admin'), express.json({ limit: '25mb' }))
 app.use(express.json({ limit: '1mb' }))
 app.use(express.urlencoded({ extended: true }))
 
@@ -80,18 +81,31 @@ const apiLimiter = rateLimit({
   skip: (req) => req.method === 'OPTIONS' || req.path === '/health',
   message: { message: 'มีการเรียกใช้งานถี่เกินไป กรุณารอสักครู่' },
 })
+// Sign-up: cap account-request spam (every attempt counts).
+const registerLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  limit: 10,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  message: { message: 'สมัครสมาชิกบ่อยเกินไป กรุณาลองใหม่ภายหลัง' },
+})
 app.use('/api', apiLimiter)
 app.use('/api/auth/login', loginLimiter)
+app.use('/api/auth/change-password', loginLimiter) // stops password guessing with a stolen token
+app.use('/api/auth/register', registerLimiter)
 
 // ── Public routes (no auth required) ────────────────────────────
 app.use('/api/health', healthRouter)
 app.use('/api/auth',   authRouter)
 
 // ── Protected routes (auth required) ────────────────────────────
-app.use('/api/upload',  requireAuth, uploadRouter)
+// viewer = read-only · editor = sync/edit/comment/upload · admin = + delete reports & manage users
+// (routes inside reports.ts add finer checks: edit/comment need editor, delete needs admin)
+app.use('/api/upload',  requireAuth, requireRole('editor', 'admin'), uploadRouter)
 app.use('/api/reports', requireAuth, reportsRouter)
 app.use('/api/export',  requireAuth, exportRouter)
-app.use('/api/jira',    requireAuth, jiraRouter)
+app.use('/api/jira',    requireAuth, requireRole('editor', 'admin'), jiraRouter)
+app.use('/api/admin',   requireAuth, requireRole('admin'), adminRouter)
 
 // ── 404 ───────────────────────────────────────────────────────
 app.use((_req, res) => {

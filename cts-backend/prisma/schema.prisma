@@ -44,3 +44,20 @@ model Ticket {
   @@index([reportId, key])
   @@map("tickets")
 }
+
+// Application users (self-registered, approved by an admin).
+//   role   : admin | editor | viewer   (viewer = read-only)
+//   status : active | pending | disabled
+// Stored as plain strings so `prisma db push` never needs an enum migration.
+model User {
+  id           String    @id @default(uuid())
+  email        String    @unique
+  name         String
+  passwordHash String    @map("password_hash")
+  role         String    @default("viewer")
+  status       String    @default("pending")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  lastLoginAt  DateTime? @map("last_login_at")
+
+  @@map("users")
+}

@@ -23,7 +23,8 @@ api.interceptors.response.use(
   (error) => {
     if (error?.response?.status === 401 && typeof window !== 'undefined') {
       localStorage.removeItem(TOKEN_KEY)
-      if (window.location.pathname !== '/login') {
+      const path = window.location.pathname
+      if (path !== '/login' && path !== '/register') {
         window.location.href = '/login'
       }
     }
@@ -174,6 +175,37 @@ export async function fetchAttachmentText(
     { responseType: 'text' }
   )
   return response.data as string
+}
+
+// ── Users & accounts ──────────────────────────────────────────
+export type UserRole = 'admin' | 'editor' | 'viewer'
+export type UserStatus = 'active' | 'pending' | 'disabled'
+
+export interface AppUser {
+  id: string
+  email: string
+  name: string
+  role: UserRole
+  status: UserStatus
+  createdAt: string
+  lastLoginAt: string | null
+}
+
+export async function listUsers(): Promise<AppUser[]> {
+  const { data } = await api.get('/api/admin/users')
+  return data as AppUser[]
+}
+
+export async function updateUser(
+  id: string,
+  patch: { role?: UserRole; status?: UserStatus; password?: string }
+): Promise<AppUser> {
+  const { data } = await api.patch(`/api/admin/users/${id}`, patch)
+  return data as AppUser
+}
+
+export async function changePassword(currentPassword: string, newPassword: string): Promise<void> {
+  await api.post('/api/auth/change-password', { currentPassword, newPassword })
 }
 
 export default api

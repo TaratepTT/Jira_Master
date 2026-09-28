@@ -4,6 +4,7 @@ import { pushTicketUpdateToJira, type JiraUpdateInput } from '../lib/jira.js'
 import { fetchJiraComments, fetchJiraChangelog, addJiraComment } from '../lib/jira.js'
 import { fetchJiraAttachments, downloadJiraAttachment } from '../lib/jira.js'
 import { buildAggregations } from '../lib/aggregate.js'
+import { requireRole } from '../middleware/requireAuth.js'
 
 const router = Router()
 
@@ -80,7 +81,7 @@ router.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
 
 // ── PATCH /api/reports/:id/tickets/:key ─────────────────────────
 // แก้ไข ticket แล้ว sync กลับไป Jira ทันที + อัปเดต local DB
-router.patch('/:id/tickets/:key', async (req: Request, res: Response, next: NextFunction) => {
+router.patch('/:id/tickets/:key', requireRole('editor', 'admin'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { id, key } = req.params
     const input = req.body as JiraUpdateInput
@@ -158,7 +159,7 @@ router.get('/:id/tickets/:key/activity', async (req: Request, res: Response, nex
 
 // ── POST /api/reports/:id/tickets/:key/comment ────────────────────
 // เพิ่ม comment ใหม่จาก Dashboard เข้า Jira โดยตรง
-router.post('/:id/tickets/:key/comment', async (req: Request, res: Response, next: NextFunction) => {
+router.post('/:id/tickets/:key/comment', requireRole('editor', 'admin'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { id, key } = req.params
     const { text } = req.body as { text?: string }
@@ -225,7 +226,7 @@ router.get('/:id/tickets/:key/attachments/:attachmentId', async (req: Request, r
 })
 
 // ── DELETE /api/reports/:id  ──────────────────────────────────
-router.delete('/:id', async (req: Request, res: Response, next: NextFunction) => {
+router.delete('/:id', requireRole('admin'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { id } = req.params
 

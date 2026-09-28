@@ -10,6 +10,7 @@ import { getTicketAttachments, downloadTicketAttachment, fetchAttachmentBlobUrl,
 import ThemeToggle from '@/components/theme/ThemeToggle'
 import ExpandableKeys from '@/components/dashboard/ExpandableKeys'
 import LogoutButton from '@/components/auth/LogoutButton'
+import { useAuth } from '@/components/auth/AuthContext'
 import TrendChart from '@/components/dashboard/TrendChart'
 
 // ── Types ─────────────────────────────────────────────────────
@@ -345,6 +346,7 @@ function getPreviewType(mimeType: string, filename: string): 'image' | 'pdf' | '
 }
 
 function TicketActivityPanel({ reportId, ticketKey }: { reportId: string; ticketKey: string }) {
+  const { canEdit } = useAuth()
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [comments, setComments] = useState<TicketComment[]>([])
@@ -646,7 +648,7 @@ function TicketActivityPanel({ reportId, ticketKey }: { reportId: string; ticket
         )}
       </div>
 
-      {tab === 'comments' && (
+      {tab === 'comments' && canEdit && (
         <div className="border-t border-slate-200 dark:border-slate-700 p-2 flex items-center gap-2">
           <input
             type="text"
@@ -686,6 +688,7 @@ function TicketDetailModal({
   onClose: () => void
   onUpdated: (updated: TicketDetail) => void
 }) {
+  const { canEdit } = useAuth()
   const [editing, setEditing] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -767,7 +770,7 @@ function TicketDetailModal({
             </a>
           </div>
           <div className="flex items-center gap-2">
-            {!editing && (
+            {!editing && canEdit && (
               <button
                 onClick={startEdit}
                 className="flex items-center gap-1 rounded-lg border border-slate-300 dark:border-slate-600 px-2.5 py-1 text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors"

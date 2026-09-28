@@ -1,12 +1,13 @@
 'use client'
 
 import { useState } from 'react'
+import Link from 'next/link'
 import { useAuth } from '@/components/auth/AuthContext'
 import ThemeToggle from '@/components/theme/ThemeToggle'
 
 export default function LoginPage() {
   const { login } = useAuth()
-  const [username, setUsername] = useState('')
+  const [identifier, setIdentifier] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
@@ -15,7 +16,7 @@ export default function LoginPage() {
     e.preventDefault()
     setError('')
     setLoading(true)
-    const result = await login(username, password)
+    const result = await login(identifier, password)
     if (!result.ok) setError(result.message ?? 'Login ไม่สำเร็จ')
     setLoading(false)
   }
@@ -40,15 +41,15 @@ export default function LoginPage() {
 
         <form onSubmit={handleSubmit} className="rounded-2xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 p-6 space-y-4">
           <div className="space-y-1.5">
-            <label className="text-xs font-medium text-slate-600 dark:text-slate-300">Username</label>
+            <label className="text-xs font-medium text-slate-600 dark:text-slate-300">อีเมล หรือ Username</label>
             <input
               type="text"
-              value={username}
-              onChange={e => setUsername(e.target.value)}
+              value={identifier}
+              onChange={e => setIdentifier(e.target.value)}
               required
               autoFocus
               className="w-full rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 px-3.5 py-2.5 text-sm text-slate-800 dark:text-slate-100 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-900/50 transition-colors"
-              placeholder="username"
+              placeholder="you@allnow.co.th"
             />
           </div>
 
@@ -78,6 +79,11 @@ export default function LoginPage() {
             {loading ? 'กำลังเข้าสู่ระบบ...' : 'เข้าสู่ระบบ'}
           </button>
         </form>
+
+        <p className="text-center text-sm text-slate-500 dark:text-slate-400 mt-5">
+          ยังไม่มีบัญชี?{' '}
+          <Link href="/register" className="font-medium text-blue-600 dark:text-blue-400 hover:underline">สมัครสมาชิก</Link>
+        </p>
       </div>
     </div>
   )

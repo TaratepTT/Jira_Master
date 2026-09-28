@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { getReports, deleteReport } from '@/lib/api'
 import ThemeToggle from '@/components/theme/ThemeToggle'
 import LogoutButton from '@/components/auth/LogoutButton'
+import { useAuth } from '@/components/auth/AuthContext'
 
 interface Report {
   id: string
@@ -18,6 +19,7 @@ export default function HomePage() {
   const [loading, setLoading] = useState(true)
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [search, setSearch] = useState('')
+  const { user, canEdit, isAdmin } = useAuth()
 
   const load = async () => {
     try {
@@ -64,14 +66,34 @@ export default function HomePage() {
             <span className="text-sm font-semibold text-slate-800 dark:text-slate-100">CTS Report</span>
           </div>
           <div className="flex items-center gap-3">
+            {isAdmin && (
+              <Link
+                href="/admin/users"
+                className="text-xs font-medium text-blue-600 dark:text-blue-400 hover:underline transition-colors"
+              >
+                จัดการผู้ใช้
+              </Link>
+            )}
+            {canEdit && (
+              <Link
+                href="/upload"
+                className="text-xs text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300 transition-colors"
+              >
+                นำเข้าจากไฟล์ (สำรอง)
+              </Link>
+            )}
+            {user && (
+              <Link
+                href="/account"
+                title="บัญชีของฉัน / เปลี่ยนรหัสผ่าน"
+                className="hidden sm:flex items-center gap-1.5 text-xs text-slate-600 dark:text-slate-300 hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
+              >
+                {user.name}
+                <span className="rounded-full bg-slate-100 dark:bg-slate-700 px-1.5 py-0.5 text-[10px] font-medium text-slate-500 dark:text-slate-400">{user.role}</span>
+              </Link>
+            )}
             <ThemeToggle />
             <LogoutButton />
-            <Link
-              href="/upload"
-              className="text-xs text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300 transition-colors"
-            >
-              นำเข้าจากไฟล์ (สำรอง)
-            </Link>
           </div>
         </div>
       </header>
@@ -88,6 +110,7 @@ export default function HomePage() {
                 Sync tickets จาก ascendcommerce-support.atlassian.net โดยตรง ตรวจสอบข้อมูลก่อนสร้าง Dashboard ทุกครั้ง
               </p>
             </div>
+            {canEdit ? (
             <Link
               href="/jira"
               className="flex items-center gap-2 rounded-xl bg-white px-6 py-3 text-sm font-semibold text-blue-700 hover:bg-blue-50 transition-colors whitespace-nowrap"
@@ -97,6 +120,12 @@ export default function HomePage() {
               </svg>
               Sync จาก Jira
             </Link>
+            ) : (
+              <p className="max-w-xs rounded-xl bg-white/15 px-4 py-3 text-xs leading-relaxed">
+                บัญชีของคุณเป็นสิทธิ์ <strong>ดูอย่างเดียว (Viewer)</strong> — ดู Dashboard ได้ทุก report
+                หากต้องการ sync หรือแก้ไขข้อมูล ให้ขอสิทธิ์ Editor จากผู้ดูแลระบบ
+              </p>
+            )}
           </div>
         </section>
 
@@ -126,7 +155,7 @@ export default function HomePage() {
               <p className="text-slate-400 dark:text-slate-500 mb-4">
                 {search ? 'ไม่พบ report ที่ตรงกับการค้นหา' : 'ยังไม่มี report — เริ่มจาก sync ข้อมูลจาก Jira'}
               </p>
-              {!search && (
+              {!search && canEdit && (
                 <Link href="/jira" className="text-sm text-blue-600 dark:text-blue-400 hover:underline">
                   Sync จาก Jira ตอนนี้
                 </Link>
@@ -155,6 +184,7 @@ export default function HomePage() {
                     >
                       ดู Dashboard
                     </Link>
+                    {isAdmin && (
                     <button
                       onClick={() => handleDelete(r.id)}
                       disabled={deletingId === r.id}
@@ -173,6 +203,7 @@ export default function HomePage() {
                         </svg>
                       )}
                     </button>
+                    )}
                   </div>
                 </li>
               ))}
