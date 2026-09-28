@@ -16,6 +16,7 @@ model Report {
   updatedAt    DateTime @updatedAt @map("updated_at")
 
   tickets      Ticket[]
+  insights     ReportInsight[]
 
   @@map("reports")
 }
@@ -60,4 +61,27 @@ model User {
   lastLoginAt  DateTime? @map("last_login_at")
 
   @@map("users")
+}
+
+// AI-generated summaries of a report (currently: recurring root causes).
+// The result is stored so viewing it again costs nothing, and token counts are kept
+// so you can see what each generation used.
+model ReportInsight {
+  id            String   @id @default(uuid())
+  reportId      String   @map("report_id")
+  kind          String   @default("root_cause")
+  result        Json
+  model         String
+  ticketCount   Int      @map("ticket_count")
+  inputTokens   Int?     @map("input_tokens")
+  outputTokens  Int?     @map("output_tokens")
+  createdById   String?  @map("created_by_id")
+  createdByName String?  @map("created_by_name")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  report Report @relation(fields: [reportId], references: [id], onDelete: Cascade)
+
+  @@index([reportId, kind, createdAt])
+  @@index([createdAt])
+  @@map("report_insights")
 }

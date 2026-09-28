@@ -208,4 +208,43 @@ export async function changePassword(currentPassword: string, newPassword: strin
   await api.post('/api/auth/change-password', { currentPassword, newPassword })
 }
 
+// ── AI: recurring root-cause summary ──────────────────────────
+export interface InsightTheme {
+  title: string
+  description: string
+  suggestedAction: string
+  ticketKeys: string[]
+  count: number
+}
+
+export interface RootCauseInsight {
+  id: string
+  createdAt: string
+  model: string
+  createdBy: string | null
+  ticketCount: number
+  inputTokens: number | null
+  outputTokens: number | null
+  result: { overview: string; themes: InsightTheme[]; analysed: number; ungroupedCount: number }
+}
+
+export interface InsightStatus {
+  enabled: boolean
+  model: string
+  dailyRemaining: number
+  latest: RootCauseInsight | null
+  preview: { ticketsWithText: number; uniqueEntries: number; willAnalyse: number; truncated: boolean }
+}
+
+export async function getRootCauseInsight(reportId: string): Promise<InsightStatus> {
+  const { data } = await api.get(`/api/insights/${reportId}/root-cause`)
+  return data as InsightStatus
+}
+
+// The AI call can take a while; the default 60 s client timeout would cut it off.
+export async function generateRootCauseInsight(reportId: string): Promise<RootCauseInsight> {
+  const { data } = await api.post(`/api/insights/${reportId}/root-cause`, undefined, { timeout: 100_000 })
+  return data as RootCauseInsight
+}
+
 export default api

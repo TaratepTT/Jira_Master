@@ -8,6 +8,7 @@ import rateLimit from 'express-rate-limit'
 
 import authRouter    from './routes/auth.js'
 import adminRouter   from './routes/admin.js'
+import insightsRouter from './routes/insights.js'
 import uploadRouter  from './routes/upload.js'
 import reportsRouter from './routes/reports.js'
 import exportRouter  from './routes/export.js'
@@ -89,7 +90,17 @@ const registerLimiter = rateLimit({
   legacyHeaders: false,
   message: { message: 'สมัครสมาชิกบ่อยเกินไป กรุณาลองใหม่ภายหลัง' },
 })
+// AI runs cost money: cap how often one IP can trigger them (reading the cached result is free).
+const aiLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  limit: 10,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  skip: (req) => req.method !== 'POST',
+  message: { message: 'สั่งให้ AI สรุปบ่อยเกินไป กรุณาลองใหม่ภายหลัง' },
+})
 app.use('/api', apiLimiter)
+app.use('/api/insights', aiLimiter)
 app.use('/api/auth/login', loginLimiter)
 app.use('/api/auth/change-password', loginLimiter) // stops password guessing with a stolen token
 app.use('/api/auth/register', registerLimiter)
@@ -106,6 +117,7 @@ app.use('/api/reports', requireAuth, reportsRouter)
 app.use('/api/export',  requireAuth, exportRouter)
 app.use('/api/jira',    requireAuth, requireRole('editor', 'admin'), jiraRouter)
 app.use('/api/admin',   requireAuth, requireRole('admin'), adminRouter)
+app.use('/api/insights', requireAuth, insightsRouter) // GET = any user, POST = editor/admin (checked inside)
 
 // ── 404 ───────────────────────────────────────────────────────
 app.use((_req, res) => {

@@ -9,6 +9,7 @@ import { getTicketActivity, addTicketComment, type TicketComment, type TicketCha
 import { getTicketAttachments, downloadTicketAttachment, fetchAttachmentBlobUrl, fetchAttachmentText, type TicketAttachment } from '@/lib/api'
 import ThemeToggle from '@/components/theme/ThemeToggle'
 import ExpandableKeys from '@/components/dashboard/ExpandableKeys'
+import RootCauseInsights from '@/components/dashboard/RootCauseInsights'
 import LogoutButton from '@/components/auth/LogoutButton'
 import { useAuth } from '@/components/auth/AuthContext'
 import TrendChart from '@/components/dashboard/TrendChart'
@@ -1339,6 +1340,9 @@ export default function DashboardPage() {
             </table>
           </div>
         </div>
+
+        {/* AI: recurring root causes */}
+        <RootCauseInsights reportId={id as string} />
 
         {/* Highlighted Issues */}
         <div className="rounded-2xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 p-5">
