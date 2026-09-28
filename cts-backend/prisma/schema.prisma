@@ -41,5 +41,6 @@ model Ticket {
   report Report @relation(fields: [reportId], references: [id], onDelete: Cascade)
 
   @@index([reportId])
+  @@index([reportId, key])
   @@map("tickets")
 }

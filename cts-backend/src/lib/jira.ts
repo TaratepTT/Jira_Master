@@ -95,20 +95,32 @@ function mapIssue(raw: Record<string, unknown>): JiraIssue {
   }
 }
 
+// ── Sync size cap ─────────────────────────────────────────────
+// How many tickets one sync may pull. Configurable via env JIRA_MAX_ISSUES
+// (default 2000, hard ceiling 5000 to protect the free-tier server's memory).
+export const MAX_SYNC_ISSUES: number = (() => {
+  const n = Number.parseInt(process.env.JIRA_MAX_ISSUES ?? '', 10)
+  if (!Number.isFinite(n) || n < 1) return 2000
+  return Math.min(n, 5000)
+})()
+
 // ── Fetch issues via new Jira Cloud /search/jql endpoint ─────
 // Uses nextPageToken pagination (NOT startAt — deprecated).
-export async function fetchJiraIssues(
+// Returns `truncated: true` when more matching tickets exist than `maxTotal`,
+// so callers can warn the user instead of silently dropping data.
+export async function fetchJiraIssuesWithMeta(
   jql: string,
-  maxTotal = 500
-): Promise<JiraIssue[]> {
+  maxTotal: number = MAX_SYNC_ISSUES
+): Promise<{ issues: JiraIssue[]; truncated: boolean }> {
   const issues: JiraIssue[] = []
   let nextPageToken: string | undefined = undefined
-  const pageSize = 50
+  let truncated = false
+  const pageSize = 100
 
-  while (issues.length < maxTotal) {
+  while (true) {
     const body: Record<string, unknown> = {
       jql,
-      maxResults: pageSize,
+      maxResults: Math.min(pageSize, maxTotal - issues.length),
       fields: FIELDS,
     }
     if (nextPageToken) body.nextPageToken = nextPageToken
@@ -135,9 +147,15 @@ export async function fetchJiraIssues(
     const isLast = Boolean(data.isLast) || !nextPageToken || page.length === 0
 
     if (isLast) break
+    if (issues.length >= maxTotal) { truncated = true; break }
   }
 
-  return issues
+  return { issues, truncated }
+}
+
+// Backwards-compatible wrapper (used by /sync and /preview)
+export async function fetchJiraIssues(jql: string, maxTotal: number = 500): Promise<JiraIssue[]> {
+  return (await fetchJiraIssuesWithMeta(jql, maxTotal)).issues
 }
 
 // ── Test connection ───────────────────────────────────────────

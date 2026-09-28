@@ -1,5 +1,5 @@
 import { Router, Request, Response, NextFunction } from 'express'
-import { fetchJiraIssues, testJiraConnection, type JiraIssue } from '../lib/jira.js'
+import { fetchJiraIssues, fetchJiraIssuesWithMeta, MAX_SYNC_ISSUES, testJiraConnection, type JiraIssue } from '../lib/jira.js'
 import prisma from '../lib/prisma.js'
 
 const router = Router()
@@ -71,7 +71,7 @@ router.post('/preview-all', async (req: Request, res: Response, next: NextFuncti
       return
     }
 
-    const issues = await fetchJiraIssues(jql, 500)
+    const { issues, truncated } = await fetchJiraIssuesWithMeta(jql)
 
     if (!issues.length) {
       res.status(422).json({ message: 'ไม่พบ ticket ที่ตรงกับ JQL นี้' })
@@ -114,6 +114,8 @@ router.post('/preview-all', async (req: Request, res: Response, next: NextFuncti
       total: rows.length,
       validCount,
       invalidCount: rows.length - validCount,
+      truncated,
+      limit: MAX_SYNC_ISSUES,
       tickets: rows,
     })
   } catch (err) {
@@ -191,7 +193,7 @@ router.post('/sync', async (req: Request, res: Response, next: NextFunction) => 
       reportName = `Jira Sync — ${new Date().toISOString().slice(0, 10)}`,
     } = req.body as { jql?: string; reportName?: string }
 
-    const issues = await fetchJiraIssues(jql, 500)
+    const issues = await fetchJiraIssues(jql, MAX_SYNC_ISSUES)
 
     if (!issues.length) {
       res.status(422).json({ message: 'ไม่พบ ticket ที่ตรงกับ JQL นี้' })

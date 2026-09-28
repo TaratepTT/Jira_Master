@@ -3,6 +3,7 @@ import prisma from '../lib/prisma.js'
 import { pushTicketUpdateToJira, type JiraUpdateInput } from '../lib/jira.js'
 import { fetchJiraComments, fetchJiraChangelog, addJiraComment } from '../lib/jira.js'
 import { fetchJiraAttachments, downloadJiraAttachment } from '../lib/jira.js'
+import { buildAggregations } from '../lib/aggregate.js'
 
 const router = Router()
 
@@ -42,78 +43,9 @@ router.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
 
     const tickets = report.tickets
 
-    const systemCount     = groupCount(tickets, 'system')
-    const statusCount     = groupCount(tickets, 'status')
-    const buCount         = groupCount(tickets, 'businessUnit')
-    const issueTypeCount  = groupCount(tickets, 'typeOfIssue')
-    const recurringCount  = groupCount(tickets, 'recurringCategory')
-
-    const frequencyTable = Object.entries(issueTypeCount)
-      .sort((a, b) => b[1] - a[1])
-      .map(([category, count], idx) => ({
-        rank: idx + 1,
-        category,
-        count,
-        pct: pct(count, tickets.length),
-        keys: tickets
-          .filter((t) => t.typeOfIssue === category)
-          .map((t) => t.key),
-      }))
-
-    const recurringCats = [
-      ...new Set(
-        tickets
-          .filter((t) => t.recurringCategory && t.recurringCategory !== 'เคสเดี่ยว')
-          .map((t) => t.recurringCategory)
-      ),
-    ]
-    const buList = Object.keys(buCount).sort((a, b) => buCount[b] - buCount[a])
-
-    const buRecurringMatrix = buList.map((bu) => {
-      const row: Record<string, string[]> = { bu: [bu] }
-      const standalone = tickets
-        .filter(
-          (t) =>
-            t.businessUnit === bu &&
-            (!t.recurringCategory || t.recurringCategory === 'เคสเดี่ยว')
-        )
-        .map((t) => t.key)
-      row['เคสเดี่ยว'] = standalone
-
-      for (const cat of recurringCats) {
-        if (!cat) continue
-        row[cat] = tickets
-          .filter((t) => t.businessUnit === bu && t.recurringCategory === cat)
-          .map((t) => t.key)
-      }
-      return row
-    })
-
-    const issueTypes = Object.keys(issueTypeCount)
-    const buIssueMatrix = buList.map((bu) => {
-      const row: Record<string, string[] | string> = { bu }
-      for (const type of issueTypes) {
-        row[type] = tickets
-          .filter((t) => t.businessUnit === bu && t.typeOfIssue === type)
-          .map((t) => t.key)
-      }
-      return row
-    })
-
-    const l3Tickets = tickets.filter(
-      (t) =>
-        t.status.toLowerCase().includes('l3') ||
-        t.status.toLowerCase().includes('investigate')
-    )
-
-    const assigneeCount = groupCount(tickets, 'assignee')
-    const topAssignees = Object.entries(assigneeCount)
-      .filter(([name]) => name && name !== 'Unknown' && name !== 'null')
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 8)
-      .map(([name, count]) => ({ name, count }))
-
-    const priorityCount = groupCount(tickets, 'priority')
+    // Single-pass aggregation (see lib/aggregate.ts). The old buRecurringMatrix /
+    // buIssueMatrix were never used by the frontend and were removed.
+    const ag = buildAggregations(tickets)
 
     res.json({
       id:           report.id,
@@ -139,26 +71,7 @@ router.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
         ticketCreatedAt:    t.ticketCreatedAt?.toISOString() ?? null,
       })),
 
-      aggregations: {
-        systemCount,
-        statusCount,
-        buCount,
-        issueTypeCount,
-        recurringCount,
-        frequencyTable,
-        buRecurringMatrix,
-        buIssueMatrix,
-        l3Tickets: l3Tickets.map((t) => ({
-          key:     t.key,
-          bu:      t.businessUnit,
-          status:  t.status,
-          summary: t.summary,
-        })),
-        top5Bu:  Object.entries(buCount).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([name, count]) => ({ name, count })),
-        top3Cat: frequencyTable.slice(0, 3),
-        topAssignees,
-        priorityCount,
-      },
+      aggregations: ag,
     })
   } catch (err) {
     next(err)
@@ -330,21 +243,6 @@ router.delete('/:id', async (req: Request, res: Response, next: NextFunction) =>
   }
 })
 
-function groupCount<T extends Record<string, unknown>>(
-  items: T[],
-  field: keyof T
-): Record<string, number> {
-  const map: Record<string, number> = {}
-  for (const item of items) {
-    const val = String(item[field] ?? 'Unknown')
-    map[val] = (map[val] ?? 0) + 1
-  }
-  return map
-}
 
-function pct(n: number, total: number): string {
-  if (!total) return '0.00%'
-  return ((n / total) * 100).toFixed(2) + '%'
-}
 
 export default router

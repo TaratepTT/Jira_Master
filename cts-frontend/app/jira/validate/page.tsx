@@ -155,6 +155,7 @@ function ValidateScreenInner() {
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [viewFilter, setViewFilter] = useState<ViewFilter>('all')
   const [search, setSearch] = useState('')
+  const [truncation, setTruncation] = useState<{ limit: number } | null>(null)
 
   useEffect(() => {
     if (!jql) {
@@ -163,8 +164,9 @@ function ValidateScreenInner() {
     }
     api.post('/api/jira/preview-all', { jql })
       .then(r => {
-        const data = r.data as { tickets: PreviewTicket[] }
+        const data = r.data as { tickets: PreviewTicket[]; truncated?: boolean; limit?: number }
         setTickets(data.tickets)
+        setTruncation(data.truncated ? { limit: data.limit ?? data.tickets.length } : null)
         setSelected(new Set(data.tickets.filter(t => t.valid).map(t => t.key)))
         setLoadState({ state: 'ready' })
       })
@@ -323,6 +325,15 @@ function ValidateScreenInner() {
             <p className="text-xs text-blue-100 mt-0.5">เลือกไว้เพื่อบันทึก</p>
           </div>
         </div>
+
+        {truncation && (
+          <div className="rounded-xl border border-red-200 dark:border-red-900/50 bg-red-50 dark:bg-red-950/20 px-5 py-3">
+            <p className="text-sm text-red-800 dark:text-red-300">
+              <strong>ดึงข้อมูลได้ไม่ครบ</strong> — มี ticket ตรงเงื่อนไขมากกว่า {truncation.limit.toLocaleString()} รายการ ระบบดึงมาแค่ {truncation.limit.toLocaleString()} รายการแรก
+              กลับไปแคบ JQL ให้เล็กลง (เช่น ช่วงวันที่สั้นลง) เพื่อให้ได้ข้อมูลครบ
+            </p>
+          </div>
+        )}
 
         {invalidCount > 0 && (
           <div className="rounded-xl border border-orange-200 dark:border-orange-900/50 bg-orange-50 dark:bg-orange-950/20 px-5 py-3 flex items-center justify-between gap-3 flex-wrap">
