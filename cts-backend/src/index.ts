@@ -9,6 +9,7 @@ import rateLimit from 'express-rate-limit'
 import authRouter    from './routes/auth.js'
 import adminRouter   from './routes/admin.js'
 import insightsRouter from './routes/insights.js'
+import compareRouter  from './routes/compare.js'
 import uploadRouter  from './routes/upload.js'
 import reportsRouter from './routes/reports.js'
 import exportRouter  from './routes/export.js'
@@ -115,6 +116,7 @@ app.use('/api/auth',   authRouter)
 app.use('/api/upload',  requireAuth, requireRole('editor', 'admin'), uploadRouter)
 app.use('/api/reports', requireAuth, reportsRouter)
 app.use('/api/export',  requireAuth, exportRouter)
+app.use('/api/compare', requireAuth, compareRouter)
 app.use('/api/jira',    requireAuth, requireRole('editor', 'admin'), jiraRouter)
 app.use('/api/admin',   requireAuth, requireRole('admin'), adminRouter)
 app.use('/api/insights', requireAuth, insightsRouter) // GET = any user, POST = editor/admin (checked inside)

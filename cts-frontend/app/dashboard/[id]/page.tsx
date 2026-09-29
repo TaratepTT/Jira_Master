@@ -1181,6 +1181,12 @@ export default function DashboardPage() {
             </div>
           </div>
           <div className="flex items-center gap-2">
+            <Link
+              href={`/compare?current=${id}`}
+              className="hidden sm:inline-flex items-center rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-1.5 text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors"
+            >
+              เทียบกับ report ก่อนหน้า
+            </Link>
             <ThemeToggle />
             <LogoutButton />
             <button

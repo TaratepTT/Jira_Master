@@ -247,4 +247,38 @@ export async function generateRootCauseInsight(reportId: string): Promise<RootCa
   return data as RootCauseInsight
 }
 
+// ── Compare two reports (e.g. this week vs last week) ─────────
+export interface CompareKpi {
+  id: 'total' | 'closed' | 'closureRate' | 'open' | 'l3'
+  label: string
+  unit: 'count' | 'percent'
+  base: number
+  current: number
+  delta: number
+  deltaPct: number | null
+  goodWhen: 'up' | 'down' | 'neutral'
+}
+export interface CompareRow { name: string; base: number; current: number; delta: number }
+export interface CompareTable { id: string; label: string; rows: CompareRow[] }
+export interface CompareTicketRef { key: string; summary: string; status: string; category: string }
+export interface CompareStatusChange { key: string; summary: string; from: string; to: string }
+export interface CompareListed<T> { total: number; items: T[] }
+export interface CompareRange { from: string | null; to: string | null; withDate: number }
+export interface ReportComparison {
+  base: { id: string; name: string; createdAt: string }
+  current: { id: string; name: string; createdAt: string }
+  overlap: { both: number; onlyCurrent: number; onlyBase: number }
+  kpis: CompareKpi[]
+  breakdowns: CompareTable[]
+  statusChanges: CompareListed<CompareStatusChange>
+  newTickets: CompareListed<CompareTicketRef>
+  goneTickets: CompareListed<CompareTicketRef>
+  windows: { base: CompareRange; current: CompareRange }
+}
+
+export async function compareReportsApi(baseId: string, currentId: string): Promise<ReportComparison> {
+  const { data } = await api.get('/api/compare', { params: { base: baseId, current: currentId } })
+  return data as ReportComparison
+}
+
 export default api

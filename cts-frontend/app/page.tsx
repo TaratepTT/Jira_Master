@@ -66,6 +66,12 @@ export default function HomePage() {
             <span className="text-sm font-semibold text-slate-800 dark:text-slate-100">CTS Report</span>
           </div>
           <div className="flex items-center gap-3">
+            <Link
+              href="/compare"
+              className="text-xs font-medium text-blue-600 dark:text-blue-400 hover:underline transition-colors"
+            >
+              เปรียบเทียบ report
+            </Link>
             {isAdmin && (
               <Link
                 href="/admin/users"
