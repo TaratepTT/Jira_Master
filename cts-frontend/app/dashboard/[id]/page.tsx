@@ -9,9 +9,7 @@ import { getTicketActivity, addTicketComment, type TicketComment, type TicketCha
 import { getTicketAttachments, downloadTicketAttachment, fetchAttachmentBlobUrl, fetchAttachmentText, type TicketAttachment } from '@/lib/api'
 import ThemeToggle from '@/components/theme/ThemeToggle'
 import ExpandableKeys from '@/components/dashboard/ExpandableKeys'
-import RootCauseInsights from '@/components/dashboard/RootCauseInsights'
 import LogoutButton from '@/components/auth/LogoutButton'
-import { useAuth } from '@/components/auth/AuthContext'
 import TrendChart from '@/components/dashboard/TrendChart'
 
 // ── Types ─────────────────────────────────────────────────────
@@ -347,7 +345,6 @@ function getPreviewType(mimeType: string, filename: string): 'image' | 'pdf' | '
 }
 
 function TicketActivityPanel({ reportId, ticketKey }: { reportId: string; ticketKey: string }) {
-  const { canEdit } = useAuth()
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [comments, setComments] = useState<TicketComment[]>([])
@@ -649,7 +646,7 @@ function TicketActivityPanel({ reportId, ticketKey }: { reportId: string; ticket
         )}
       </div>
 
-      {tab === 'comments' && canEdit && (
+      {tab === 'comments' && (
         <div className="border-t border-slate-200 dark:border-slate-700 p-2 flex items-center gap-2">
           <input
             type="text"
@@ -675,6 +672,14 @@ function TicketActivityPanel({ reportId, ticketKey }: { reportId: string; ticket
 }
 
 
+// Kept in one place so the Dashboard edit modal and the Validate screen always
+// offer the exact same Type of Issue choices. Includes every category actually
+// seen in synced data plus a few extra ones the team uses in Jira.
+const TYPE_OF_ISSUE_OPTIONS = [
+  'Non-app issue', 'App issue', 'User request', 'Human Error', 'Data Issue',
+  'Other', 'Monitor', 'Referral', 'Bug Issue', 'Alert', 'Q&A',
+]
+
 const STATUS_EDIT_OPTIONS = [
   'Closed', 'Resolved', 'CLOSING', 'Cancel',
   'L1-In progress', 'L2-Acknowledge', 'L2-IN PROGRESS',
@@ -689,7 +694,6 @@ function TicketDetailModal({
   onClose: () => void
   onUpdated: (updated: TicketDetail) => void
 }) {
-  const { canEdit } = useAuth()
   const [editing, setEditing] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -771,7 +775,7 @@ function TicketDetailModal({
             </a>
           </div>
           <div className="flex items-center gap-2">
-            {!editing && canEdit && (
+            {!editing && (
               <button
                 onClick={startEdit}
                 className="flex items-center gap-1 rounded-lg border border-slate-300 dark:border-slate-600 px-2.5 py-1 text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors"
@@ -840,7 +844,7 @@ function TicketDetailModal({
                   onChange={e => setDraft(d => ({ ...d, typeOfIssue: e.target.value }))}
                   className="w-full rounded-lg border border-blue-400 bg-white dark:bg-slate-700 px-2 py-1.5 text-xs text-slate-800 dark:text-slate-100 outline-none"
                 >
-                  {['Non-app issue', 'User request', 'Human Error', 'Data Issue', 'Other'].map(s => (
+                  {TYPE_OF_ISSUE_OPTIONS.map(s => (
                     <option key={s} value={s}>{s}</option>
                   ))}
                 </select>
@@ -1181,12 +1185,6 @@ export default function DashboardPage() {
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <Link
-              href={`/compare?current=${id}`}
-              className="hidden sm:inline-flex items-center rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-1.5 text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors"
-            >
-              เทียบกับ report ก่อนหน้า
-            </Link>
             <ThemeToggle />
             <LogoutButton />
             <button
@@ -1346,9 +1344,6 @@ export default function DashboardPage() {
             </table>
           </div>
         </div>
-
-        {/* AI: recurring root causes */}
-        <RootCauseInsights reportId={id as string} />
 
         {/* Highlighted Issues */}
         <div className="rounded-2xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 p-5">

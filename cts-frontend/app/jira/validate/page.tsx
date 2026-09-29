@@ -185,7 +185,7 @@ function ValidateScreenInner() {
 
   const typeOfIssueOptions = useMemo(() => {
     const set = new Set(tickets.map(t => t.typeOfIssue).filter(Boolean))
-    ;['Non-app issue', 'User request', 'Human Error', 'Data Issue', 'Other'].forEach(s => set.add(s))
+    ;['Non-app issue', 'App issue', 'User request', 'Human Error', 'Data Issue', 'Other', 'Monitor', 'Referral', 'Bug Issue', 'Alert', 'Q&A'].forEach(s => set.add(s))
     return Array.from(set).sort()
   }, [tickets])
 

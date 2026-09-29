@@ -172,8 +172,8 @@ export async function testJiraConnection(): Promise<{ ok: boolean; email: string
 const WRITE_FIELD_IDS = {
   businessUnit: 'customfield_10207', // plain text field
   typeOfIssue:  'customfield_10169', // select/option field
-  rootCause:    'customfield_10079', // textarea field (plain string)
-  resolution:   'customfield_10053', // textarea field (plain string)
+  rootCause:    'customfield_10079', // rich-text field — written as ADF via toAdf()
+  resolution:   'customfield_10053', // rich-text field — written as ADF via toAdf()
 }
 
 export interface JiraUpdateInput {
@@ -182,6 +182,21 @@ export interface JiraUpdateInput {
   rootCause?: string
   resolution?: string
   status?: string // target status NAME (e.g. "Closed") — resolved via transitions
+}
+
+// ── Build an Atlassian Document (ADF) from plain text ────────────
+// Root Cause / Resolution are rich-text custom fields in this Jira instance —
+// Jira rejects a plain string for them ("Operation value must be an Atlassian
+// Document"). An empty/blank string clears the field (Jira accepts `null` for
+// clearing an optional custom field; an empty ADF document is NOT accepted).
+function toAdf(text: string): unknown {
+  const trimmed = text.trim()
+  if (!trimmed) return null
+  return {
+    type: 'doc',
+    version: 1,
+    content: [{ type: 'paragraph', content: [{ type: 'text', text: trimmed }] }],
+  }
 }
 
 // ── Update plain/select fields on an issue (PUT /issue/{key}) ───
@@ -257,10 +272,10 @@ export async function pushTicketUpdateToJira(
     fields[WRITE_FIELD_IDS.typeOfIssue] = { value: input.typeOfIssue }
   }
   if (input.rootCause !== undefined) {
-    fields[WRITE_FIELD_IDS.rootCause] = input.rootCause
+    fields[WRITE_FIELD_IDS.rootCause] = toAdf(input.rootCause)
   }
   if (input.resolution !== undefined) {
-    fields[WRITE_FIELD_IDS.resolution] = input.resolution
+    fields[WRITE_FIELD_IDS.resolution] = toAdf(input.resolution)
   }
 
   if (Object.keys(fields).length > 0) {
