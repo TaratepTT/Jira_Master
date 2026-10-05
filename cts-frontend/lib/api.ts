@@ -70,6 +70,7 @@ export interface TicketUpdateInput {
   rootCause?: string
   resolution?: string
   deployDate?: string | null // "YYYY-MM-DD"; '' or null = clear
+  transitionResolution?: string // Jira's built-in Resolution, when the status change requires one
   status?: string
 }
 
@@ -95,9 +96,15 @@ export async function updateTicket(reportId: string, key: string, input: TicketU
 }
 
 // ── Statuses Jira allows right now (fills the Status dropdown) ─
+export interface TransitionRequirement {
+  resolutionOptions?: string[]   // Jira requires a built-in Resolution for this move
+  resolutionDefault?: string
+  needs?: string[]               // other required fields this app cannot fill
+}
 export interface TicketTransitions {
   current: string
   allowed: string[]
+  details?: Record<string, TransitionRequirement>
   error?: string
 }
 

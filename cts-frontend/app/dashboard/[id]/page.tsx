@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import api from '@/lib/api'
-import { updateTicket, getTicketTransitions, type BulkUpdateResponse } from '@/lib/api'
+import { updateTicket, getTicketTransitions, type BulkUpdateResponse, type TransitionRequirement } from '@/lib/api'
 import { getTicketActivity, addTicketComment, type TicketComment, type TicketChangelogEntry } from '@/lib/api'
 import { getTicketAttachments, downloadTicketAttachment, fetchAttachmentBlobUrl, fetchAttachmentText, type TicketAttachment } from '@/lib/api'
 import ThemeToggle from '@/components/theme/ThemeToggle'
@@ -705,6 +705,8 @@ function TicketDetailModal({
   // Statuses Jira allows right now (null = not loaded yet)
   const [allowedStatuses, setAllowedStatuses] = useState<string[] | null>(null)
   const [statusNote, setStatusNote] = useState('')
+  const [transitionDetails, setTransitionDetails] = useState<Record<string, TransitionRequirement>>({})
+  const [transitionResolution, setTransitionResolution] = useState('')
 
   const [draft, setDraft] = useState({
     businessUnit: ticket.businessUnit || '',
@@ -728,10 +730,13 @@ function TicketDetailModal({
     setWarnings([])
     setAllowedStatuses(null)
     setStatusNote('')
+    setTransitionDetails({})
+    setTransitionResolution('')
     setEditing(true)
     getTicketTransitions(reportId, ticket.key)
       .then(t => {
         setAllowedStatuses(t.allowed)
+        setTransitionDetails(t.details ?? {})
         if (t.error) setStatusNote(t.error)
         else if (t.allowed.length === 0) setStatusNote('ไม่มีสถานะอื่นที่ Jira อนุญาตให้เปลี่ยนจากสถานะนี้ (workflow หรือสิทธิ์ของบัญชี)')
       })
@@ -760,7 +765,12 @@ function TicketDetailModal({
         return
       }
 
-      const result = await updateTicket(reportId, ticket.key, changed)
+      const statusReq = changed.status ? transitionDetails[changed.status] : undefined
+      const payload: Record<string, string> = { ...changed }
+      if (statusReq?.resolutionOptions?.length) {
+        payload.transitionResolution = transitionResolution || statusReq.resolutionDefault || statusReq.resolutionOptions[0]
+      }
+      const result = await updateTicket(reportId, ticket.key, payload)
       onUpdated({ ...ticket, ...result.ticket })
       if (result.warnings.length > 0) setWarnings(result.warnings)
       setEditing(false)
@@ -831,7 +841,11 @@ function TicketDetailModal({
                 <>
                   <select
                     value={draft.status}
-                    onChange={e => setDraft(d => ({ ...d, status: e.target.value }))}
+                    onChange={e => {
+                      const st = e.target.value
+                      setDraft(d => ({ ...d, status: st }))
+                      setTransitionResolution(transitionDetails[st]?.resolutionDefault ?? '')
+                    }}
                     disabled={allowedStatuses === null}
                     className="w-full rounded-lg border border-blue-400 bg-white dark:bg-slate-700 px-2 py-1.5 text-xs text-slate-800 dark:text-slate-100 outline-none disabled:opacity-60"
                   >
@@ -841,6 +855,23 @@ function TicketDetailModal({
                   </select>
                   {allowedStatuses === null && <p className="mt-1 text-[11px] text-slate-400">กำลังดึงสถานะที่เปลี่ยนได้จาก Jira...</p>}
                   {statusNote && <p className="mt-1 text-[11px] text-orange-600 dark:text-orange-400">{statusNote}</p>}
+                  {draft.status !== ticket.status && transitionDetails[draft.status]?.resolutionOptions && (
+                    <div className="mt-2">
+                      <p className="text-[11px] font-medium text-slate-400 mb-1">Resolution ที่ Jira ต้องการสำหรับสถานะนี้</p>
+                      <select
+                        value={transitionResolution || transitionDetails[draft.status].resolutionDefault || ''}
+                        onChange={e => setTransitionResolution(e.target.value)}
+                        className="w-full rounded-lg border border-blue-400 bg-white dark:bg-slate-700 px-2 py-1.5 text-xs text-slate-800 dark:text-slate-100 outline-none"
+                      >
+                        {transitionDetails[draft.status].resolutionOptions!.map(o => <option key={o} value={o}>{o}</option>)}
+                      </select>
+                    </div>
+                  )}
+                  {draft.status !== ticket.status && transitionDetails[draft.status]?.needs && (
+                    <p className="mt-1.5 text-[11px] text-orange-600 dark:text-orange-400">
+                      Jira ต้องการข้อมูลเพิ่มสำหรับสถานะนี้: {transitionDetails[draft.status].needs!.join(', ')} — ถ้าบันทึกไม่ผ่าน ให้กรอกใน Jira โดยตรง
+                    </p>
+                  )}
                 </>
               ) : (
                 <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${statusBadge(ticket.status)}`}>

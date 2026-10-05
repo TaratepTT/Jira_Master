@@ -183,6 +183,7 @@ export interface JiraUpdateInput {
   rootCause?: string
   resolution?: string
   deployDate?: string | null // "YYYY-MM-DD", or ''/null to clear
+  transitionResolution?: string // built-in Resolution to send when the status change requires one
   status?: string // target status NAME (e.g. "Closed") — resolved via transitions
 }
 
@@ -214,28 +215,92 @@ async function updateJiraFields(key: string, fields: Record<string, unknown>): P
 }
 
 // ── Get available workflow transitions for an issue ─────────────
+// `fields` = the transition screen: what Jira requires/accepts when making this move
+// (e.g. the built-in Resolution is usually REQUIRED when moving to Resolved).
+interface JiraTransitionField {
+  required?: boolean
+  name?: string
+  hasDefaultValue?: boolean
+  allowedValues?: Array<{ id?: string; name?: string; value?: string }>
+}
 interface JiraTransition {
   id: string
   name: string
   to: { name: string }
+  fields?: Record<string, JiraTransitionField>
 }
 
 async function getTransitions(key: string): Promise<JiraTransition[]> {
-  const { data } = await jiraClient.get(`/issue/${key}/transitions`)
+  const { data } = await jiraClient.get(`/issue/${key}/transitions`, { params: { expand: 'transitions.fields' } })
   return (data.transitions ?? []) as JiraTransition[]
 }
 
+function optionNames(f?: JiraTransitionField): string[] {
+  return (f?.allowedValues ?? []).map(v => v.name ?? v.value ?? '').filter(Boolean)
+}
+
+// Picks a sensible default for Jira's built-in Resolution (the user can override in the UI).
+const RESOLUTION_PREFERENCE = ['done', 'fixed', 'resolved', 'complete', 'completed']
+export function pickDefaultResolution(options: string[]): string | undefined {
+  for (const pref of RESOLUTION_PREFERENCE) {
+    const hit = options.find(o => o.toLowerCase() === pref)
+    if (hit) return hit
+  }
+  return options[0]
+}
+
+export interface AllowedStatusInfo {
+  /** built-in Jira Resolution the transition requires — options to choose from */
+  resolutionOptions?: string[]
+  resolutionDefault?: string
+  /** other REQUIRED fields on the transition screen that this app cannot fill (names) */
+  needs?: string[]
+}
+
+// Fields this app fills itself (written to the issue BEFORE the transition runs), so
+// they don't count as "needs" even if the transition screen lists them as required.
+const FILLED_BY_APP = new Set(['customfield_10207', 'customfield_10169', 'customfield_10079', 'customfield_10053', 'customfield_10185'])
+
 // Statuses this ticket can move to RIGHT NOW, as allowed by the Jira workflow for the
 // account that owns the API token. Used to fill the Status dropdown.
-export async function fetchAllowedStatuses(key: string): Promise<string[]> {
+export async function fetchAllowedStatuses(key: string): Promise<{ allowed: string[]; details: Record<string, AllowedStatusInfo> }> {
   const transitions = await getTransitions(key)
-  return Array.from(new Set(transitions.map(t => t.to.name).filter(Boolean)))
+  const allowed = Array.from(new Set(transitions.map(t => t.to.name).filter(Boolean)))
+  const details: Record<string, AllowedStatusInfo> = {}
+  for (const t of transitions) {
+    const info: AllowedStatusInfo = {}
+    const res = t.fields?.resolution
+    if (res?.required) {
+      const opts = optionNames(res)
+      if (opts.length) { info.resolutionOptions = opts; info.resolutionDefault = pickDefaultResolution(opts) }
+    }
+    const needs = Object.entries(t.fields ?? {})
+      .filter(([id, f]) => f.required && !f.hasDefaultValue && id !== 'resolution' && !FILLED_BY_APP.has(id))
+      .map(([id, f]) => f.name ?? id)
+    if (needs.length) info.needs = needs
+    if (info.resolutionOptions || info.needs) details[t.to.name] = info
+  }
+  return { allowed, details }
+}
+
+// Turn Jira's error body into one readable line: field errors use the field's display name.
+function describeJiraError(data: unknown, fields?: Record<string, JiraTransitionField>): string {
+  const d = (data ?? {}) as { errorMessages?: string[]; errors?: Record<string, string> }
+  const parts: string[] = [...(d.errorMessages ?? [])]
+  for (const [id, msg] of Object.entries(d.errors ?? {})) {
+    parts.push(`${fields?.[id]?.name ?? id}: ${msg}`)
+  }
+  return parts.join(' | ')
 }
 
 // ── Transition an issue to a target status by NAME ───────────────
 // Jira statuses are workflow-controlled — you can't just set a field,
 // you must find the transition that leads to the desired status.
-async function transitionIssueToStatus(key: string, targetStatusName: string): Promise<{ ok: boolean; message?: string }> {
+async function transitionIssueToStatus(
+  key: string,
+  targetStatusName: string,
+  resolutionChoice?: string,
+): Promise<{ ok: boolean; message?: string }> {
   const transitions = await getTransitions(key)
 
   const match = transitions.find(
@@ -251,15 +316,26 @@ async function transitionIssueToStatus(key: string, targetStatusName: string): P
     }
   }
 
+  // When the transition screen REQUIRES the built-in Resolution, send one.
+  const payload: { transition: { id: string }; fields?: Record<string, unknown> } = { transition: { id: match.id } }
+  const resField = match.fields?.resolution
+  if (resField?.required) {
+    const opts = optionNames(resField)
+    const chosen = resolutionChoice && opts.includes(resolutionChoice) ? resolutionChoice : pickDefaultResolution(opts)
+    if (chosen) payload.fields = { resolution: { name: chosen } }
+  }
+
   try {
-    await jiraClient.post(`/issue/${key}/transitions`, {
-      transition: { id: match.id },
-    })
+    await jiraClient.post(`/issue/${key}/transitions`, payload)
     return { ok: true }
   } catch (err: unknown) {
     const e = err as { response?: { status?: number; data?: unknown } }
-    console.error(`[jira] transition failed for ${key}`, JSON.stringify(e?.response?.data))
-    return { ok: false, message: 'เปลี่ยนสถานะใน Jira ไม่สำเร็จ' }
+    console.error(`[jira] transition failed for ${key} -> ${match.to.name} (status ${e?.response?.status})`, JSON.stringify(e?.response?.data))
+    const reason = describeJiraError(e?.response?.data, match.fields)
+    return {
+      ok: false,
+      message: `เปลี่ยนสถานะเป็น "${match.to.name}" ใน Jira ไม่สำเร็จ${reason ? ` — Jira แจ้งว่า: ${reason}` : e?.response?.status ? ` (HTTP ${e.response.status})` : ''}`,
+    }
   }
 }
 
@@ -320,7 +396,7 @@ export async function pushTicketUpdateToJira(
 
   // 2) Status — requires a workflow transition, handled separately
   if (input.status) {
-    const result = await transitionIssueToStatus(key, input.status)
+    const result = await transitionIssueToStatus(key, input.status, input.transitionResolution)
     if (!result.ok && result.message) warnings.push(result.message)
   }
 

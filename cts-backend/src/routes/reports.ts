@@ -94,8 +94,8 @@ router.get('/:id/tickets/:key/transitions', requireRole('editor', 'admin'), asyn
       return
     }
     try {
-      const allowed = await fetchAllowedStatuses(key)
-      res.json({ current: ticket.status, allowed })
+      const { allowed, details } = await fetchAllowedStatuses(key)
+      res.json({ current: ticket.status, allowed, details })
     } catch (err) {
       console.error(`[jira] transitions failed for ${key}:`, err instanceof Error ? err.message : err)
       res.json({ current: ticket.status, allowed: [], error: 'ดึงรายการสถานะที่เปลี่ยนได้จาก Jira ไม่สำเร็จ' })
@@ -160,7 +160,7 @@ router.patch('/:id/tickets/:key', requireRole('editor', 'admin'), async (req: Re
       reportId: id,
       ticketKey: key,
       summary: `แก้ไข ${key}: ${Object.keys(changes).join(', ') || 'ไม่มีการเปลี่ยนแปลง'}${ok ? '' : ' (Jira มีคำเตือน)'}`,
-      details: { changes, warnings, jiraOk: ok },
+      details: { changes, warnings, jiraOk: ok, ...(input.transitionResolution ? { transitionResolution: input.transitionResolution } : {}) },
       success: ok,
     })
 
