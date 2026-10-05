@@ -105,6 +105,11 @@ router.patch('/:id/tickets/:key', requireRole('editor', 'admin'), async (req: Re
     if (input.typeOfIssue  !== undefined) dbUpdate.typeOfIssue  = input.typeOfIssue
     if (input.rootCause    !== undefined) dbUpdate.rootCause    = input.rootCause
     if (input.resolution   !== undefined) dbUpdate.resolution   = input.resolution
+    if (input.deployDate   !== undefined) {
+      const dd = input.deployDate ? String(input.deployDate).trim() : ''
+      if (!dd) dbUpdate.deployDate = null
+      else if (/^\d{4}-\d{2}-\d{2}/.test(dd)) dbUpdate.deployDate = dd.slice(0, 10)
+    }
     if (input.status       !== undefined && ok) dbUpdate.status = input.status
 
     const updated = await prisma.ticket.update({

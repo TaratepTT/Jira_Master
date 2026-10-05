@@ -69,6 +69,7 @@ export interface TicketUpdateInput {
   typeOfIssue?: string
   rootCause?: string
   resolution?: string
+  deployDate?: string | null // "YYYY-MM-DD"; '' or null = clear
   status?: string
 }
 

@@ -10,6 +10,8 @@ import { getTicketAttachments, downloadTicketAttachment, fetchAttachmentBlobUrl,
 import ThemeToggle from '@/components/theme/ThemeToggle'
 import ExpandableKeys from '@/components/dashboard/ExpandableKeys'
 import LogoutButton from '@/components/auth/LogoutButton'
+import { useAuth } from '@/components/auth/AuthContext'
+import RootCauseInsights from '@/components/dashboard/RootCauseInsights'
 import TrendChart from '@/components/dashboard/TrendChart'
 
 // ── Types ─────────────────────────────────────────────────────
@@ -69,6 +71,11 @@ function formatDate(d?: string) {
   const date = new Date(d)
   if (isNaN(date.getTime())) return d
   return date.toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: 'numeric' })
+}
+// "2026-09-01" or "2026-09-01T10:00:00.000+0700" -> "2026-09-01" (value for <input type="date">)
+function toDateInput(d?: string | null) {
+  const m = /^(\d{4}-\d{2}-\d{2})/.exec(d ?? '')
+  return m ? m[1] : ''
 }
 function isClosedStatus(s: string) {
   return s.toLowerCase().includes('closed') || s.toLowerCase().includes('done')
@@ -350,6 +357,7 @@ function TicketActivityPanel({ reportId, ticketKey }: { reportId: string; ticket
   const [comments, setComments] = useState<TicketComment[]>([])
   const [changelog, setChangelog] = useState<TicketChangelogEntry[]>([])
   const [attachments, setAttachments] = useState<TicketAttachment[]>([])
+  const { canEdit } = useAuth()
   const [tab, setTab] = useState<'comments' | 'changelog' | 'attachments'>('comments')
   const [newComment, setNewComment] = useState('')
   const [posting, setPosting] = useState(false)
@@ -646,7 +654,7 @@ function TicketActivityPanel({ reportId, ticketKey }: { reportId: string; ticket
         )}
       </div>
 
-      {tab === 'comments' && (
+      {tab === 'comments' && canEdit && (
         <div className="border-t border-slate-200 dark:border-slate-700 p-2 flex items-center gap-2">
           <input
             type="text"
@@ -694,6 +702,7 @@ function TicketDetailModal({
   onClose: () => void
   onUpdated: (updated: TicketDetail) => void
 }) {
+  const { canEdit } = useAuth()
   const [editing, setEditing] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -705,6 +714,7 @@ function TicketDetailModal({
     status:       ticket.status || '',
     rootCause:    ticket.rootCause || '',
     resolution:   ticket.resolution || '',
+    deployDate:   toDateInput(ticket.deployDate),
   })
 
   const startEdit = () => {
@@ -714,6 +724,7 @@ function TicketDetailModal({
       status:       ticket.status || '',
       rootCause:    ticket.rootCause || '',
       resolution:   ticket.resolution || '',
+      deployDate:   toDateInput(ticket.deployDate),
     })
     setError('')
     setWarnings([])
@@ -731,6 +742,7 @@ function TicketDetailModal({
       if (draft.status       !== (ticket.status || ''))       changed.status       = draft.status
       if (draft.rootCause    !== (ticket.rootCause || ''))    changed.rootCause    = draft.rootCause
       if (draft.resolution   !== (ticket.resolution || ''))   changed.resolution   = draft.resolution
+      if (draft.deployDate   !== toDateInput(ticket.deployDate)) changed.deployDate = draft.deployDate // '' = clear in Jira
 
       if (Object.keys(changed).length === 0) {
         setEditing(false)
@@ -775,7 +787,7 @@ function TicketDetailModal({
             </a>
           </div>
           <div className="flex items-center gap-2">
-            {!editing && (
+            {!editing && canEdit && (
               <button
                 onClick={startEdit}
                 className="flex items-center gap-1 rounded-lg border border-slate-300 dark:border-slate-600 px-2.5 py-1 text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors"
@@ -854,16 +866,37 @@ function TicketDetailModal({
             </div>
             <div>
               <p className="text-xs font-medium text-slate-400 mb-1">Deploy Date</p>
-              <p className="text-slate-700 dark:text-slate-200">
-                {ticket.deployDate
-                  ? <span className="inline-flex items-center gap-1 text-indigo-600 dark:text-indigo-400 font-medium">
-                      <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4.5 12.75l6 6 9-13.5" />
-                      </svg>
-                      {formatDate(ticket.deployDate)}
-                    </span>
-                  : <span className="text-slate-300 dark:text-slate-600">ยังไม่ deploy</span>}
-              </p>
+              {editing ? (
+                <div className="flex items-center gap-1.5">
+                  <input
+                    type="date"
+                    value={draft.deployDate}
+                    onChange={e => setDraft(d => ({ ...d, deployDate: e.target.value }))}
+                    className="min-w-0 flex-1 rounded-lg border border-blue-400 bg-white dark:bg-slate-700 px-2 py-1.5 text-xs text-slate-800 dark:text-slate-100 outline-none"
+                  />
+                  {draft.deployDate && (
+                    <button
+                      type="button"
+                      onClick={() => setDraft(d => ({ ...d, deployDate: '' }))}
+                      className="shrink-0 rounded-lg border border-slate-300 dark:border-slate-600 px-2 py-1.5 text-xs text-slate-500 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors"
+                      title="ล้างวันที่ deploy"
+                    >
+                      ล้าง
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <p className="text-slate-700 dark:text-slate-200">
+                  {ticket.deployDate
+                    ? <span className="inline-flex items-center gap-1 text-indigo-600 dark:text-indigo-400 font-medium">
+                        <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4.5 12.75l6 6 9-13.5" />
+                        </svg>
+                        {formatDate(ticket.deployDate)}
+                      </span>
+                    : <span className="text-slate-300 dark:text-slate-600">ยังไม่ deploy</span>}
+                </p>
+              )}
             </div>
           </div>
 
@@ -1187,6 +1220,15 @@ export default function DashboardPage() {
           <div className="flex items-center gap-2">
             <ThemeToggle />
             <LogoutButton />
+            <Link
+              href={`/compare?current=${id}`}
+              className="flex items-center gap-1.5 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-1.5 text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors"
+            >
+              <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7.5 21L3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5" />
+              </svg>
+              เทียบกับ report ก่อนหน้า
+            </Link>
             <button
               onClick={handleExportCsv}
               disabled={exportingCsv}
@@ -1344,6 +1386,9 @@ export default function DashboardPage() {
             </table>
           </div>
         </div>
+
+        {/* AI Root Cause summary */}
+        <RootCauseInsights reportId={id} />
 
         {/* Highlighted Issues */}
         <div className="rounded-2xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 p-5">

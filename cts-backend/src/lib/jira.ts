@@ -174,6 +174,7 @@ const WRITE_FIELD_IDS = {
   typeOfIssue:  'customfield_10169', // select/option field
   rootCause:    'customfield_10079', // rich-text field — written as ADF via toAdf()
   resolution:   'customfield_10053', // rich-text field — written as ADF via toAdf()
+  deployDate:   'customfield_10185', // date picker — "YYYY-MM-DD", or null to clear
 }
 
 export interface JiraUpdateInput {
@@ -181,6 +182,7 @@ export interface JiraUpdateInput {
   typeOfIssue?: string
   rootCause?: string
   resolution?: string
+  deployDate?: string | null // "YYYY-MM-DD", or ''/null to clear
   status?: string // target status NAME (e.g. "Closed") — resolved via transitions
 }
 
@@ -254,6 +256,21 @@ async function transitionIssueToStatus(key: string, targetStatusName: string): P
   }
 }
 
+// ── Deploy Date → value Jira accepts ─────────────────────────────
+// Returns "YYYY-MM-DD" (valid real date), null (clear the field),
+// or undefined (invalid input — caller should skip and warn).
+function normalizeDeployDate(v: string | null): string | null | undefined {
+  if (v === null || v === undefined) return null
+  const t = String(v).trim()
+  if (!t) return null
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(t)
+  if (!m) return undefined
+  const [y, mo, d] = [Number(m[1]), Number(m[2]), Number(m[3])]
+  const dt = new Date(Date.UTC(y, mo - 1, d))
+  if (dt.getUTCFullYear() !== y || dt.getUTCMonth() !== mo - 1 || dt.getUTCDate() !== d) return undefined
+  return `${m[1]}-${m[2]}-${m[3]}`
+}
+
 // ── Main entry point: push a set of dashboard edits back to Jira ─
 // Returns which parts succeeded/failed so the caller can report clearly.
 export async function pushTicketUpdateToJira(
@@ -262,7 +279,7 @@ export async function pushTicketUpdateToJira(
 ): Promise<{ ok: boolean; warnings: string[] }> {
   const warnings: string[] = []
 
-  // 1) Plain/select fields (Business Unit, Type of Issue, Root Cause, Resolution)
+  // 1) Plain/select fields (Business Unit, Type of Issue, Root Cause, Resolution, Deploy Date)
   const fields: Record<string, unknown> = {}
 
   if (input.businessUnit !== undefined) {
@@ -276,6 +293,14 @@ export async function pushTicketUpdateToJira(
   }
   if (input.resolution !== undefined) {
     fields[WRITE_FIELD_IDS.resolution] = toAdf(input.resolution)
+  }
+  if (input.deployDate !== undefined) {
+    const d = normalizeDeployDate(input.deployDate)
+    if (d === undefined) {
+      warnings.push('รูปแบบ Deploy Date ไม่ถูกต้อง (ต้องเป็น YYYY-MM-DD) — ข้ามการอัปเดตวันที่')
+    } else {
+      fields[WRITE_FIELD_IDS.deployDate] = d
+    }
   }
 
   if (Object.keys(fields).length > 0) {
