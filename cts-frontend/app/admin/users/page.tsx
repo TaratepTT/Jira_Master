@@ -107,6 +107,7 @@ export default function AdminUsersPage() {
             <span className="text-sm font-semibold text-slate-800 dark:text-slate-100">จัดการผู้ใช้</span>
           </div>
           <div className="flex items-center gap-2">
+            <Link href="/admin/audit" className="text-xs font-medium text-blue-600 dark:text-blue-400 hover:underline">ประวัติการใช้งาน</Link>
             <ThemeToggle />
             <LogoutButton />
           </div>

@@ -94,6 +94,78 @@ export async function updateTicket(reportId: string, key: string, input: TicketU
   }
 }
 
+// ── Statuses Jira allows right now (fills the Status dropdown) ─
+export interface TicketTransitions {
+  current: string
+  allowed: string[]
+  error?: string
+}
+
+export async function getTicketTransitions(reportId: string, key: string): Promise<TicketTransitions> {
+  const { data } = await api.get(`/api/reports/${reportId}/tickets/${key}/transitions`)
+  return data as TicketTransitions
+}
+
+// ── Bulk edit: many tickets at once, written back to Jira ─────
+export interface BulkChanges {
+  businessUnit?: string
+  typeOfIssue?: string
+  deployDate?: string | null // null = clear
+}
+export interface BulkResultItem {
+  key: string
+  status: 'updated' | 'skipped' | 'failed' | 'not_found'
+  message?: string
+  ticket?: { businessUnit: string; typeOfIssue: string; deployDate: string | null }
+}
+export interface BulkUpdateResponse {
+  total: number
+  updated: number
+  skipped: number
+  failed: number
+  notFound: number
+  results: BulkResultItem[]
+}
+export const BULK_MAX_TICKETS = 100
+
+// Up to 100 Jira writes; the default 60 s client timeout could cut it off.
+export async function bulkUpdateTickets(reportId: string, keys: string[], changes: BulkChanges): Promise<BulkUpdateResponse> {
+  const { data } = await api.post(`/api/reports/${reportId}/bulk-update`, { keys, changes }, { timeout: 150_000 })
+  return data as BulkUpdateResponse
+}
+
+// ── Audit log (admin only) ────────────────────────────────────
+export interface AuditLogEntry {
+  id: string
+  createdAt: string
+  userName: string
+  userEmail: string
+  userRole: string
+  action: string
+  reportId: string | null
+  ticketKey: string | null
+  summary: string
+  details: {
+    changes?: Record<string, { from: string; to: string }>
+    warnings?: string[]
+    text?: string
+    batchId?: string
+    error?: string
+  } | null
+  success: boolean
+}
+export interface AuditLogPage {
+  items: AuditLogEntry[]
+  total: number
+  page: number
+  pageSize: number
+}
+
+export async function getAuditLog(params: { page?: number; action?: string; q?: string }): Promise<AuditLogPage> {
+  const { data } = await api.get('/api/admin/audit', { params })
+  return data as AuditLogPage
+}
+
 // ── Ticket activity: comments + changelog ─────────────────────
 export interface TicketComment {
   id: string

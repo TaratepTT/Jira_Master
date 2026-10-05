@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import api from '@/lib/api'
-import { updateTicket } from '@/lib/api'
+import { updateTicket, getTicketTransitions, type BulkUpdateResponse } from '@/lib/api'
 import { getTicketActivity, addTicketComment, type TicketComment, type TicketChangelogEntry } from '@/lib/api'
 import { getTicketAttachments, downloadTicketAttachment, fetchAttachmentBlobUrl, fetchAttachmentText, type TicketAttachment } from '@/lib/api'
 import ThemeToggle from '@/components/theme/ThemeToggle'
@@ -12,6 +12,7 @@ import ExpandableKeys from '@/components/dashboard/ExpandableKeys'
 import LogoutButton from '@/components/auth/LogoutButton'
 import { useAuth } from '@/components/auth/AuthContext'
 import RootCauseInsights from '@/components/dashboard/RootCauseInsights'
+import BulkEditModal from '@/components/dashboard/BulkEditModal'
 import TrendChart from '@/components/dashboard/TrendChart'
 
 // ── Types ─────────────────────────────────────────────────────
@@ -688,12 +689,6 @@ const TYPE_OF_ISSUE_OPTIONS = [
   'Other', 'Monitor', 'Referral', 'Bug Issue', 'Alert', 'Q&A',
 ]
 
-const STATUS_EDIT_OPTIONS = [
-  'Closed', 'Resolved', 'CLOSING', 'Cancel',
-  'L1-In progress', 'L2-Acknowledge', 'L2-IN PROGRESS',
-  'L3-INVESTIGATE', 'Waiting for customer', 'New issue',
-]
-
 function TicketDetailModal({
   ticket, reportId, onClose, onUpdated,
 }: {
@@ -707,6 +702,9 @@ function TicketDetailModal({
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [warnings, setWarnings] = useState<string[]>([])
+  // Statuses Jira allows right now (null = not loaded yet)
+  const [allowedStatuses, setAllowedStatuses] = useState<string[] | null>(null)
+  const [statusNote, setStatusNote] = useState('')
 
   const [draft, setDraft] = useState({
     businessUnit: ticket.businessUnit || '',
@@ -728,7 +726,19 @@ function TicketDetailModal({
     })
     setError('')
     setWarnings([])
+    setAllowedStatuses(null)
+    setStatusNote('')
     setEditing(true)
+    getTicketTransitions(reportId, ticket.key)
+      .then(t => {
+        setAllowedStatuses(t.allowed)
+        if (t.error) setStatusNote(t.error)
+        else if (t.allowed.length === 0) setStatusNote('ไม่มีสถานะอื่นที่ Jira อนุญาตให้เปลี่ยนจากสถานะนี้ (workflow หรือสิทธิ์ของบัญชี)')
+      })
+      .catch(() => {
+        setAllowedStatuses([])
+        setStatusNote('ดึงรายการสถานะที่เปลี่ยนได้ไม่สำเร็จ — เปลี่ยนสถานะไม่ได้ในตอนนี้')
+      })
   }
 
   const handleSave = async () => {
@@ -818,13 +828,20 @@ function TicketDetailModal({
             <div>
               <p className="text-xs font-medium text-slate-400 mb-1">Status</p>
               {editing ? (
-                <select
-                  value={draft.status}
-                  onChange={e => setDraft(d => ({ ...d, status: e.target.value }))}
-                  className="w-full rounded-lg border border-blue-400 bg-white dark:bg-slate-700 px-2 py-1.5 text-xs text-slate-800 dark:text-slate-100 outline-none"
-                >
-                  {STATUS_EDIT_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
-                </select>
+                <>
+                  <select
+                    value={draft.status}
+                    onChange={e => setDraft(d => ({ ...d, status: e.target.value }))}
+                    disabled={allowedStatuses === null}
+                    className="w-full rounded-lg border border-blue-400 bg-white dark:bg-slate-700 px-2 py-1.5 text-xs text-slate-800 dark:text-slate-100 outline-none disabled:opacity-60"
+                  >
+                    {[ticket.status, ...(allowedStatuses ?? []).filter(x => x !== ticket.status)].map(st => (
+                      <option key={st} value={st}>{st === ticket.status ? `${st} (ปัจจุบัน)` : st}</option>
+                    ))}
+                  </select>
+                  {allowedStatuses === null && <p className="mt-1 text-[11px] text-slate-400">กำลังดึงสถานะที่เปลี่ยนได้จาก Jira...</p>}
+                  {statusNote && <p className="mt-1 text-[11px] text-orange-600 dark:text-orange-400">{statusNote}</p>}
+                </>
               ) : (
                 <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${statusBadge(ticket.status)}`}>
                   {ticket.status}
@@ -992,6 +1009,8 @@ function TicketDetailModal({
 // ── Main dashboard ─────────────────────────────────────────────
 export default function DashboardPage() {
   const { id } = useParams<{ id: string }>()
+  const { canEdit } = useAuth()
+  const [bulkOpen, setBulkOpen] = useState(false)
   const [data, setData] = useState<ReportData | null>(null)
   const [error, setError] = useState('')
   const [selectedTicket, setSelectedTicket] = useState<TicketDetail | null>(null)
@@ -1042,6 +1061,22 @@ export default function DashboardPage() {
     api.get(`/api/reports/${id}`)
       .then(r => setData(r.data))
       .catch(e => setError(e?.response?.data?.message ?? 'โหลด report ไม่สำเร็จ'))
+  }, [id])
+
+  // After a bulk edit: reload the whole report so the charts/counters (BU, categories...)
+  // match the new values. A failed reload is silent — the table was already patched locally.
+  const handleBulkDone = useCallback((res: BulkUpdateResponse) => {
+    const byKey = new Map(res.results.filter(r => r.status === 'updated' && r.ticket).map(r => [r.key, r.ticket!]))
+    if (byKey.size > 0) {
+      setData(prev => prev ? {
+        ...prev,
+        tickets: prev.tickets.map(t => {
+          const u = byKey.get(t.key)
+          return u ? { ...t, businessUnit: u.businessUnit, typeOfIssue: u.typeOfIssue, deployDate: u.deployDate ?? '' } : t
+        }),
+      } : prev)
+      api.get(`/api/reports/${id}`).then(r => setData(r.data)).catch(() => { /* keep local patch */ })
+    }
   }, [id])
 
   const buOptions = useMemo(() => {
@@ -1135,6 +1170,16 @@ export default function DashboardPage() {
       const next = new Set(prev)
       if (next.has(key)) next.delete(key)
       else next.add(key)
+      return next
+    })
+  }
+
+  const allShownSelected = filteredTickets.length > 0 && filteredTickets.every(t => highlighted.has(t.key))
+  const toggleAllShown = () => {
+    setHighlighted(prev => {
+      const next = new Set(prev)
+      if (allShownSelected) filteredTickets.forEach(t => next.delete(t.key))
+      else filteredTickets.forEach(t => next.add(t.key))
       return next
     })
   }
@@ -1397,9 +1442,22 @@ export default function DashboardPage() {
               รายการที่เลือกไว้ {highlighted.size > 0 && <span className="text-blue-600 dark:text-blue-400">({highlighted.size})</span>}
             </h2>
             {highlighted.size > 0 && (
-              <button onClick={() => setHighlighted(new Set())} className="text-xs font-medium text-red-500 hover:underline">
-                ล้างทั้งหมด
-              </button>
+              <div className="flex items-center gap-3">
+                {canEdit && (
+                  <button
+                    onClick={() => setBulkOpen(true)}
+                    className="flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 transition-colors"
+                  >
+                    <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931z" />
+                    </svg>
+                    แก้ไขพร้อมกัน ({highlighted.size})
+                  </button>
+                )}
+                <button onClick={() => setHighlighted(new Set())} className="text-xs font-medium text-red-500 hover:underline">
+                  ล้างทั้งหมด
+                </button>
+              </div>
             )}
           </div>
 
@@ -1559,7 +1617,17 @@ export default function DashboardPage() {
                   <SortableHeader label="Root Cause" sortKey="rootCause"    activeKey={sortKey} dir={sortDir} onSort={handleSort} onResizeStart={startResize('rootCause')} />
                   <SortableHeader label="Resolution" sortKey="resolution"   activeKey={sortKey} dir={sortDir} onSort={handleSort} onResizeStart={startResize('resolution')} />
                   <SortableHeader label="Deploy"     sortKey="deployDate"   activeKey={sortKey} dir={sortDir} onSort={handleSort} onResizeStart={startResize('deployDate')} />
-                  <th className="text-center py-2 px-3 text-xs font-medium text-slate-500 dark:text-slate-400">เลือก</th>
+                  <th className="text-center py-2 px-3 text-xs font-medium text-slate-500 dark:text-slate-400">
+                    <label className="inline-flex flex-col items-center gap-1 cursor-pointer" title="เลือก/ยกเลิกทุกรายการที่แสดงอยู่ (ตามตัวกรองปัจจุบัน)">
+                      <span>เลือก</span>
+                      <input
+                        type="checkbox"
+                        checked={allShownSelected}
+                        onChange={toggleAllShown}
+                        className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                      />
+                    </label>
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -1628,6 +1696,16 @@ export default function DashboardPage() {
         </div>
 
       </main>
+
+      {bulkOpen && data && (
+        <BulkEditModal
+          reportId={id as string}
+          tickets={data.tickets.filter(t => highlighted.has(t.key))}
+          typeOptions={TYPE_OF_ISSUE_OPTIONS}
+          onClose={() => setBulkOpen(false)}
+          onDone={handleBulkDone}
+        />
+      )}
 
       {selectedTicket && (
         <TicketDetailModal

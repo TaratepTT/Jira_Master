@@ -80,6 +80,14 @@ export default function HomePage() {
                 จัดการผู้ใช้
               </Link>
             )}
+            {isAdmin && (
+              <Link
+                href="/admin/audit"
+                className="text-xs font-medium text-blue-600 dark:text-blue-400 hover:underline transition-colors"
+              >
+                ประวัติการใช้งาน
+              </Link>
+            )}
             {canEdit && (
               <Link
                 href="/upload"

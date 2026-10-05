@@ -225,6 +225,13 @@ async function getTransitions(key: string): Promise<JiraTransition[]> {
   return (data.transitions ?? []) as JiraTransition[]
 }
 
+// Statuses this ticket can move to RIGHT NOW, as allowed by the Jira workflow for the
+// account that owns the API token. Used to fill the Status dropdown.
+export async function fetchAllowedStatuses(key: string): Promise<string[]> {
+  const transitions = await getTransitions(key)
+  return Array.from(new Set(transitions.map(t => t.to.name).filter(Boolean)))
+}
+
 // ── Transition an issue to a target status by NAME ───────────────
 // Jira statuses are workflow-controlled — you can't just set a field,
 // you must find the transition that leads to the desired status.
@@ -259,7 +266,7 @@ async function transitionIssueToStatus(key: string, targetStatusName: string): P
 // ── Deploy Date → value Jira accepts ─────────────────────────────
 // Returns "YYYY-MM-DD" (valid real date), null (clear the field),
 // or undefined (invalid input — caller should skip and warn).
-function normalizeDeployDate(v: string | null): string | null | undefined {
+export function normalizeDeployDate(v: string | null): string | null | undefined {
   if (v === null || v === undefined) return null
   const t = String(v).trim()
   if (!t) return null
@@ -385,18 +392,27 @@ export async function fetchJiraChangelog(key: string): Promise<JiraChangelogEntr
 }
 
 // ── Add a new comment to a ticket ────────────────────────────────
-export async function addJiraComment(key: string, text: string): Promise<void> {
+// Every write goes through ONE Jira API token, so Jira would show all comments as the
+// token owner. `author` (the Dashboard user who pressed the button) is appended as a
+// signature line so the real person is visible in Jira.
+export async function addJiraComment(key: string, text: string, author?: string): Promise<void> {
+  const paragraphs: unknown[] = text
+    .split(/\r?\n/)
+    .map(line => ({
+      type: 'paragraph',
+      content: line.trim() ? [{ type: 'text', text: line }] : [],
+    }))
+
+  const name = (author ?? '').replace(/[\r\n]+/g, ' ').trim().slice(0, 80)
+  if (name) {
+    paragraphs.push({
+      type: 'paragraph',
+      content: [{ type: 'text', text: `— ${name} (ผ่าน CTS Dashboard)`, marks: [{ type: 'em' }] }],
+    })
+  }
+
   await jiraClient.post(`/issue/${key}/comment`, {
-    body: {
-      type: 'doc',
-      version: 1,
-      content: [
-        {
-          type: 'paragraph',
-          content: [{ type: 'text', text }],
-        },
-      ],
-    },
+    body: { type: 'doc', version: 1, content: paragraphs },
   })
 }
 

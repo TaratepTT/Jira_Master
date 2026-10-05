@@ -1,10 +1,12 @@
 import { Router, Request, Response, NextFunction } from 'express'
 import prisma from '../lib/prisma.js'
-import { pushTicketUpdateToJira, type JiraUpdateInput } from '../lib/jira.js'
+import { pushTicketUpdateToJira, fetchAllowedStatuses, normalizeDeployDate, type JiraUpdateInput } from '../lib/jira.js'
+import { recordAudit, diffFields, clip, type AuditEntry } from '../lib/audit.js'
+import { randomUUID } from 'node:crypto'
 import { fetchJiraComments, fetchJiraChangelog, addJiraComment } from '../lib/jira.js'
 import { fetchJiraAttachments, downloadJiraAttachment } from '../lib/jira.js'
 import { buildAggregations } from '../lib/aggregate.js'
-import { requireRole } from '../middleware/requireAuth.js'
+import { requireRole, type AuthedRequest } from '../middleware/requireAuth.js'
 
 const router = Router()
 
@@ -79,12 +81,37 @@ router.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
   }
 })
 
+// ── GET /api/reports/:id/tickets/:key/transitions ────────────────
+// Statuses Jira lets this ticket move to right now (workflow + token permissions).
+// The edit modal fills its Status dropdown from this, so users never pick a status
+// that Jira would reject.
+router.get('/:id/tickets/:key/transitions', requireRole('editor', 'admin'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { id, key } = req.params
+    const ticket = await prisma.ticket.findFirst({ where: { reportId: id, key } })
+    if (!ticket) {
+      res.status(404).json({ message: 'ไม่พบ ticket นี้ใน report' })
+      return
+    }
+    try {
+      const allowed = await fetchAllowedStatuses(key)
+      res.json({ current: ticket.status, allowed })
+    } catch (err) {
+      console.error(`[jira] transitions failed for ${key}:`, err instanceof Error ? err.message : err)
+      res.json({ current: ticket.status, allowed: [], error: 'ดึงรายการสถานะที่เปลี่ยนได้จาก Jira ไม่สำเร็จ' })
+    }
+  } catch (err) {
+    next(err)
+  }
+})
+
 // ── PATCH /api/reports/:id/tickets/:key ─────────────────────────
 // แก้ไข ticket แล้ว sync กลับไป Jira ทันที + อัปเดต local DB
 router.patch('/:id/tickets/:key', requireRole('editor', 'admin'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { id, key } = req.params
     const input = req.body as JiraUpdateInput
+    const actor = (req as AuthedRequest).user
 
     const ticket = await prisma.ticket.findFirst({
       where: { reportId: id, key },
@@ -112,9 +139,29 @@ router.patch('/:id/tickets/:key', requireRole('editor', 'admin'), async (req: Re
     }
     if (input.status       !== undefined && ok) dbUpdate.status = input.status
 
+    // What the user asked for (status is reported as requested even if Jira refused it)
+    const requested: Record<string, unknown> = { ...dbUpdate }
+    if (input.status !== undefined) requested.status = input.status
+    const changes = diffFields(
+      {
+        businessUnit: ticket.businessUnit, typeOfIssue: ticket.typeOfIssue, rootCause: ticket.rootCause,
+        resolution: ticket.resolution, deployDate: ticket.deployDate, status: ticket.status,
+      },
+      requested,
+    )
+
     const updated = await prisma.ticket.update({
       where: { id: ticket.id },
       data: dbUpdate,
+    })
+
+    await recordAudit(actor, {
+      action: 'ticket.update',
+      reportId: id,
+      ticketKey: key,
+      summary: `แก้ไข ${key}: ${Object.keys(changes).join(', ') || 'ไม่มีการเปลี่ยนแปลง'}${ok ? '' : ' (Jira มีคำเตือน)'}`,
+      details: { changes, warnings, jiraOk: ok },
+      success: ok,
     })
 
     res.json({
@@ -133,6 +180,144 @@ router.patch('/:id/tickets/:key', requireRole('editor', 'admin'), async (req: Re
         resolution:         updated.resolution,
         deployDate:         updated.deployDate,
       },
+    })
+  } catch (err) {
+    next(err)
+  }
+})
+
+// ── POST /api/reports/:id/bulk-update ────────────────────────────
+// Body: { keys: string[], changes: { businessUnit?, typeOfIssue?, deployDate? (null = clear) } }
+// Edits many tickets at once and writes each one back to Jira. Only the three "safe"
+// fields are allowed in bulk: Status needs a per-ticket workflow transition, and
+// Root Cause / Resolution are free text that should be written per ticket.
+// A ticket's local copy is updated ONLY when Jira accepted the change, so the Dashboard
+// never claims something that Jira rejected.
+const BULK_MAX = 100
+const BULK_CONCURRENCY = 3
+
+type BulkStatus = 'updated' | 'skipped' | 'failed' | 'not_found'
+interface BulkResult {
+  key: string
+  status: BulkStatus
+  message?: string
+  ticket?: { businessUnit: string; typeOfIssue: string; deployDate: string | null }
+}
+
+async function runPool<T>(items: T[], limit: number, fn: (item: T, index: number) => Promise<void>): Promise<void> {
+  let next = 0
+  const worker = async () => {
+    for (;;) {
+      const i = next++
+      if (i >= items.length) return
+      await fn(items[i], i)
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker))
+}
+
+router.post('/:id/bulk-update', requireRole('editor', 'admin'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { id } = req.params
+    const actor = (req as AuthedRequest).user
+    const body = (req.body ?? {}) as { keys?: unknown; changes?: Record<string, unknown> }
+
+    const keys = Array.isArray(body.keys)
+      ? Array.from(new Set(body.keys.filter((k): k is string => typeof k === 'string').map(k => k.trim()).filter(Boolean)))
+      : []
+    if (!keys.length) { res.status(400).json({ message: 'ยังไม่ได้เลือก ticket' }); return }
+    if (keys.length > BULK_MAX) {
+      res.status(400).json({ message: `แก้ไขพร้อมกันได้สูงสุด ${BULK_MAX} ticket ต่อครั้ง (เลือกมา ${keys.length})` }); return
+    }
+
+    const raw = body.changes ?? {}
+    const changes: { businessUnit?: string; typeOfIssue?: string; deployDate?: string | null } = {}
+    if (raw.businessUnit !== undefined) {
+      const v = typeof raw.businessUnit === 'string' ? raw.businessUnit.trim() : ''
+      if (!v) { res.status(400).json({ message: 'Business Unit ต้องไม่ว่าง' }); return }
+      changes.businessUnit = v
+    }
+    if (raw.typeOfIssue !== undefined) {
+      const v = typeof raw.typeOfIssue === 'string' ? raw.typeOfIssue.trim() : ''
+      if (!v) { res.status(400).json({ message: 'Type of Issue ต้องไม่ว่าง' }); return }
+      changes.typeOfIssue = v
+    }
+    if (raw.deployDate !== undefined) {
+      const d = normalizeDeployDate(raw.deployDate as string | null)
+      if (d === undefined) { res.status(400).json({ message: 'รูปแบบ Deploy Date ไม่ถูกต้อง (ต้องเป็น YYYY-MM-DD)' }); return }
+      changes.deployDate = d // null = clear
+    }
+    if (Object.keys(changes).length === 0) {
+      res.status(400).json({ message: 'ยังไม่ได้เลือก field ที่จะแก้ไข' }); return
+    }
+
+    const tickets = await prisma.ticket.findMany({ where: { reportId: id, key: { in: keys } } })
+    const byKey = new Map<string, (typeof tickets)[number]>()
+    for (const t of tickets) if (!byKey.has(t.key)) byKey.set(t.key, t)
+
+    const batchId = randomUUID()
+    const results: BulkResult[] = new Array(keys.length)
+    const auditList: AuditEntry[] = []
+
+    await runPool(keys, BULK_CONCURRENCY, async (key, idx) => {
+      const t = byKey.get(key)
+      if (!t) { results[idx] = { key, status: 'not_found', message: 'ไม่พบ ticket นี้ใน report' }; return }
+
+      // Only send fields whose value really differs from what we have
+      const effective: JiraUpdateInput = {}
+      if (changes.businessUnit !== undefined && changes.businessUnit !== (t.businessUnit || '')) effective.businessUnit = changes.businessUnit
+      if (changes.typeOfIssue  !== undefined && changes.typeOfIssue  !== (t.typeOfIssue  || '')) effective.typeOfIssue  = changes.typeOfIssue
+      if (changes.deployDate   !== undefined) {
+        const cur = t.deployDate ? t.deployDate.slice(0, 10) : ''
+        if ((changes.deployDate ?? '') !== cur) effective.deployDate = changes.deployDate
+      }
+      if (Object.keys(effective).length === 0) {
+        results[idx] = { key, status: 'skipped', message: 'ค่าตรงกับที่มีอยู่แล้ว' }
+        return
+      }
+
+      const after: Record<string, unknown> = {}
+      if (effective.businessUnit !== undefined) after.businessUnit = effective.businessUnit
+      if (effective.typeOfIssue  !== undefined) after.typeOfIssue  = effective.typeOfIssue
+      if (effective.deployDate   !== undefined) after.deployDate   = effective.deployDate ?? ''
+      const diff = diffFields(
+        { businessUnit: t.businessUnit, typeOfIssue: t.typeOfIssue, deployDate: t.deployDate ? t.deployDate.slice(0, 10) : '' },
+        after,
+      )
+
+      try {
+        const { ok, warnings } = await pushTicketUpdateToJira(key, effective)
+        if (!ok) {
+          results[idx] = { key, status: 'failed', message: clip(warnings.join(' | '), 300) || 'Jira ไม่รับการเปลี่ยนแปลง' }
+          auditList.push({ action: 'ticket.bulk_update', reportId: id, ticketKey: key, summary: `แก้หลาย ticket ไม่สำเร็จ: ${key}`, details: { batchId, changes: diff, warnings }, success: false })
+          return
+        }
+        const data: Record<string, unknown> = {}
+        if (effective.businessUnit !== undefined) data.businessUnit = effective.businessUnit
+        if (effective.typeOfIssue  !== undefined) data.typeOfIssue  = effective.typeOfIssue
+        if (effective.deployDate   !== undefined) data.deployDate   = effective.deployDate // null clears
+        const updated = await prisma.ticket.update({ where: { id: t.id }, data })
+        results[idx] = {
+          key, status: 'updated',
+          ticket: { businessUnit: updated.businessUnit, typeOfIssue: updated.typeOfIssue, deployDate: updated.deployDate },
+        }
+        auditList.push({ action: 'ticket.bulk_update', reportId: id, ticketKey: key, summary: `แก้หลาย ticket: ${key} (${Object.keys(diff).join(', ')})`, details: { batchId, changes: diff }, success: true })
+      } catch (err) {
+        results[idx] = { key, status: 'failed', message: err instanceof Error ? clip(err.message, 300) : 'เกิดข้อผิดพลาด' }
+        auditList.push({ action: 'ticket.bulk_update', reportId: id, ticketKey: key, summary: `แก้หลาย ticket ไม่สำเร็จ: ${key}`, details: { batchId, changes: diff, error: err instanceof Error ? err.message : String(err) }, success: false })
+      }
+    })
+
+    await recordAudit(actor, auditList)
+
+    const count = (st: BulkStatus) => results.filter(r => r.status === st).length
+    res.json({
+      total: keys.length,
+      updated: count('updated'),
+      skipped: count('skipped'),
+      failed: count('failed'),
+      notFound: count('not_found'),
+      results,
     })
   } catch (err) {
     next(err)
@@ -180,7 +365,13 @@ router.post('/:id/tickets/:key/comment', requireRole('editor', 'admin'), async (
       return
     }
 
-    await addJiraComment(key, text.trim())
+    const actor = (req as AuthedRequest).user
+    await addJiraComment(key, text.trim(), actor?.name)
+    await recordAudit(actor, {
+      action: 'ticket.comment', reportId: id, ticketKey: key,
+      summary: `เพิ่ม comment ที่ ${key}`,
+      details: { text: clip(text.trim(), 500) },
+    })
 
     const comments = await fetchJiraComments(key)
     res.json({ message: 'เพิ่ม comment สำเร็จ', comments })
@@ -235,13 +426,18 @@ router.delete('/:id', requireRole('admin'), async (req: Request, res: Response, 
   try {
     const { id } = req.params
 
-    const exists = await prisma.report.findUnique({ where: { id }, select: { id: true } })
+    const exists = await prisma.report.findUnique({ where: { id }, select: { id: true, name: true, totalTickets: true } })
     if (!exists) {
       res.status(404).json({ message: 'ไม่พบ report นี้' })
       return
     }
 
     await prisma.report.delete({ where: { id } })
+    await recordAudit((req as AuthedRequest).user, {
+      action: 'report.delete', reportId: id,
+      summary: `ลบ report "${exists.name}" (${exists.totalTickets} tickets)`,
+      details: { name: exists.name, totalTickets: exists.totalTickets },
+    })
 
     res.json({ message: 'ลบ report เรียบร้อย' })
   } catch (err) {

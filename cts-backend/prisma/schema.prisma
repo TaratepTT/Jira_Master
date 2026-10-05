@@ -85,3 +85,26 @@ model ReportInsight {
   @@index([createdAt])
   @@map("report_insights")
 }
+
+// Who did what. One row per action (a bulk edit writes one row per ticket, grouped by details.batchId).
+// No foreign keys on purpose: audit rows must survive deleting a report or a user.
+//   action : ticket.update | ticket.bulk_update | ticket.comment | report.create | report.delete | user.update
+model AuditLog {
+  id        String   @id @default(uuid())
+  createdAt DateTime @default(now()) @map("created_at")
+  userId    String?  @map("user_id")
+  userName  String   @map("user_name")
+  userEmail String   @map("user_email")
+  userRole  String   @map("user_role")
+  action    String
+  reportId  String?  @map("report_id")
+  ticketKey String?  @map("ticket_key")
+  summary   String
+  details   Json?
+  success   Boolean  @default(true)
+
+  @@index([createdAt])
+  @@index([action, createdAt])
+  @@index([ticketKey])
+  @@map("audit_logs")
+}
