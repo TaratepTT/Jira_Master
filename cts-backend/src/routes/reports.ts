@@ -1,6 +1,10 @@
 import { Router, Request, Response, NextFunction } from 'express'
 import prisma from '../lib/prisma.js'
-import { pushTicketUpdateToJira, fetchAllowedStatuses, normalizeDeployDate, type JiraUpdateInput } from '../lib/jira.js'
+import {
+  pushTicketUpdateToJira, fetchAllowedStatuses, normalizeDeployDate,
+  fetchExtraFields, prepareExtraFieldUpdate, EXTRA_FIELD_NAMES,
+  type JiraUpdateInput, type ExtraFieldInput,
+} from '../lib/jira.js'
 import { recordAudit, diffFields, clip, type AuditEntry } from '../lib/audit.js'
 import { randomUUID } from 'node:crypto'
 import { fetchJiraComments, fetchJiraChangelog, addJiraComment } from '../lib/jira.js'
@@ -105,6 +109,29 @@ router.get('/:id/tickets/:key/transitions', requireRole('editor', 'admin'), asyn
   }
 })
 
+// ── GET /api/reports/:id/tickets/:key/custom-fields ──────────────
+// Action Card / Type / Task Type with the options Jira allows and the ticket's current value.
+router.get('/:id/tickets/:key/custom-fields', requireRole('editor', 'admin'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { id, key } = req.params
+    const ticket = await prisma.ticket.findFirst({ where: { reportId: id, key } })
+    if (!ticket) {
+      res.status(404).json({ message: 'ไม่พบ ticket นี้ใน report' })
+      return
+    }
+    try {
+      const fields = await fetchExtraFields(key)
+      const found = new Set(fields.map(f => f.name.toLowerCase()))
+      res.json({ fields, missing: EXTRA_FIELD_NAMES.filter(n => !found.has(n.toLowerCase())) })
+    } catch (err) {
+      console.error(`[jira] editmeta failed for ${key}:`, err instanceof Error ? err.message : err)
+      res.json({ fields: [], missing: [], error: 'ดึงข้อมูล Action Card / Type / Task Type จาก Jira ไม่สำเร็จ' })
+    }
+  } catch (err) {
+    next(err)
+  }
+})
+
 // ── PATCH /api/reports/:id/tickets/:key ─────────────────────────
 // แก้ไข ticket แล้ว sync กลับไป Jira ทันที + อัปเดต local DB
 router.patch('/:id/tickets/:key', requireRole('editor', 'admin'), async (req: Request, res: Response, next: NextFunction) => {
@@ -122,8 +149,25 @@ router.patch('/:id/tickets/:key', requireRole('editor', 'admin'), async (req: Re
       return
     }
 
+    // Extra dropdown fields (Action Card / Type / Task Type): validate against Jira's own
+    // metadata BEFORE anything is written, so a bad request changes nothing.
+    // Never forward the raw body to Jira — only what prepareExtraFieldUpdate() built.
+    const rawCustom = (req.body as { customFields?: unknown } | undefined)?.customFields
+    let extraPayload: Record<string, unknown> | undefined
+    let extraChanges: Record<string, { from: string; to: string }> = {}
+    if (rawCustom && typeof rawCustom === 'object' && Object.keys(rawCustom as object).length > 0) {
+      const prep = await prepareExtraFieldUpdate(key, rawCustom as Record<string, ExtraFieldInput>)
+      if (!prep.ok) {
+        res.status(400).json({ message: prep.message })
+        return
+      }
+      extraPayload = prep.payload
+      extraChanges = prep.changes
+    }
+    delete (input as { customFields?: unknown }).customFields
+
     // 1) Push changes to Jira first — this is the source of truth
-    const { ok, warnings } = await pushTicketUpdateToJira(key, input)
+    const { ok, warnings } = await pushTicketUpdateToJira(key, input, extraPayload)
 
     // 2) Update local DB regardless, so the Dashboard reflects the edit
     //    immediately even if some Jira fields failed (warnings shown to user)
@@ -138,17 +182,21 @@ router.patch('/:id/tickets/:key', requireRole('editor', 'admin'), async (req: Re
       else if (/^\d{4}-\d{2}-\d{2}/.test(dd)) dbUpdate.deployDate = dd.slice(0, 10)
     }
     if (input.status       !== undefined && ok) dbUpdate.status = input.status
+    // "Type of System" is also stored locally (standaloneCategory, shown in the CSV export)
+    if (ok && extraChanges['Type of System'] !== undefined) dbUpdate.standaloneCategory = extraChanges['Type of System'].to || null
 
     // What the user asked for (status is reported as requested even if Jira refused it)
     const requested: Record<string, unknown> = { ...dbUpdate }
     if (input.status !== undefined) requested.status = input.status
-    const changes = diffFields(
+    const changes: Record<string, { from: string; to: string }> = diffFields(
       {
         businessUnit: ticket.businessUnit, typeOfIssue: ticket.typeOfIssue, rootCause: ticket.rootCause,
         resolution: ticket.resolution, deployDate: ticket.deployDate, status: ticket.status,
       },
       requested,
     )
+
+    if (ok) Object.assign(changes, extraChanges) // dropdown fields are not stored locally — audit only
 
     const updated = await prisma.ticket.update({
       where: { id: ticket.id },

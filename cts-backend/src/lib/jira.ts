@@ -490,6 +490,158 @@ async function transitionIssueToStatus(
   }
 }
 
+// ══════════════════════════════════════════════════════════════
+// ── EXTRA FIELDS editable from the Dashboard (found BY NAME) ────
+// Action Card / Type / Task Type are dropdowns in Jira, and some workflow transitions
+// (e.g. → Resolved) refuse to run while they are empty. Their field IDs are not
+// hard-coded: they are looked up by display name in the issue's edit screen, together
+// with the options Jira allows — so the Dashboard always offers exactly Jira's own choices.
+// ══════════════════════════════════════════════════════════════
+export const EXTRA_FIELD_NAMES = ['Action Card', 'Type', 'Task Type', 'Type of System']
+
+export interface ExtraFieldOption { id: string; value: string; children?: Array<{ id: string; value: string }> }
+export interface ExtraFieldMeta {
+  id: string
+  name: string
+  kind: 'option' | 'option-with-child' | 'multi-option' | 'text'
+  required: boolean
+  options: ExtraFieldOption[]
+  current: { id?: string; childId?: string; ids?: string[]; text?: string }
+  currentLabel: string
+}
+// What the browser sends back for one field: null = clear
+export type ExtraFieldInput = { id: string; childId?: string } | { ids: string[] } | { text: string } | null
+
+interface RawOption { id?: unknown; value?: unknown; name?: unknown; children?: RawOption[] }
+const optLabel = (o: RawOption | null | undefined): string => String(o?.value ?? o?.name ?? '')
+
+export async function fetchExtraFields(key: string): Promise<ExtraFieldMeta[]> {
+  const { data } = await jiraClient.get(`/issue/${key}/editmeta`)
+  const raw = (data?.fields ?? {}) as Record<string, {
+    name?: string; required?: boolean
+    schema?: { type?: string; items?: string; custom?: string }
+    allowedValues?: RawOption[]
+  }>
+
+  const order = new Map(EXTRA_FIELD_NAMES.map((n, i) => [n.toLowerCase(), i]))
+  const picked: Array<{ id: string; f: (typeof raw)[string]; kind: ExtraFieldMeta['kind'] }> = []
+  for (const [id, f] of Object.entries(raw)) {
+    if (!id.startsWith('customfield_') || !f?.name) continue
+    if (!order.has(f.name.trim().toLowerCase())) continue
+    const t = f.schema?.type
+    const kind: ExtraFieldMeta['kind'] | null =
+      t === 'option' ? 'option'
+      : t === 'option-with-child' ? 'option-with-child'
+      : t === 'array' && f.schema?.items === 'option' ? 'multi-option'
+      : t === 'string' && (f.schema?.custom ?? '').endsWith(':textfield') ? 'text' // single-line text only (rich text is ADF — not supported here)
+      : null
+    if (kind) picked.push({ id, f, kind })
+  }
+  picked.sort((a, b) => (order.get(a.f.name!.trim().toLowerCase()) ?? 99) - (order.get(b.f.name!.trim().toLowerCase()) ?? 99))
+  if (!picked.length) return []
+
+  const current = await fetchCurrentFieldValues(key, picked.map(p => p.id))
+
+  return picked.map(({ id, f, kind }) => {
+    const options: ExtraFieldOption[] = (f.allowedValues ?? [])
+      .filter(o => o && o.id !== undefined && optLabel(o))
+      .map(o => ({
+        id: String(o.id),
+        value: optLabel(o),
+        ...(o.children?.length
+          ? { children: o.children.filter(c => c && c.id !== undefined && optLabel(c)).map(c => ({ id: String(c.id), value: optLabel(c) })) }
+          : {}),
+      }))
+
+    const cur = current[id] as RawOption | RawOption[] | string | null | undefined
+    let cv: ExtraFieldMeta['current'] = {}
+    let label = ''
+    if (kind === 'text') {
+      const t = typeof cur === 'string' ? cur : ''
+      cv = { text: t }
+      label = t
+    } else if (kind === 'multi-option') {
+      const arr = Array.isArray(cur) ? cur : []
+      cv = { ids: arr.filter(o => o?.id !== undefined).map(o => String(o.id)) }
+      label = arr.map(optLabel).filter(Boolean).join(', ')
+    } else if (cur && typeof cur === 'object' && !Array.isArray(cur) && cur.id !== undefined) {
+      cv = { id: String(cur.id) }
+      label = optLabel(cur)
+      const child = (cur as { child?: RawOption }).child
+      if (kind === 'option-with-child' && child?.id !== undefined) {
+        cv.childId = String(child.id)
+        label = `${label} › ${optLabel(child)}`
+      }
+    }
+    return { id, name: f.name!.trim(), kind, required: !!f.required, options, current: cv, currentLabel: label }
+  })
+}
+
+// Validate what the browser sent against Jira's own metadata and build the write payload.
+// Only fields found by NAME above can be written, and only with options Jira lists, so an
+// editor cannot use this endpoint to set arbitrary custom fields or arbitrary values.
+export async function prepareExtraFieldUpdate(
+  key: string,
+  input: Record<string, ExtraFieldInput>,
+): Promise<
+  | { ok: true; payload: Record<string, unknown>; changes: Record<string, { from: string; to: string }> }
+  | { ok: false; message: string }
+> {
+  let metas: ExtraFieldMeta[]
+  try {
+    metas = await fetchExtraFields(key)
+  } catch {
+    return { ok: false, message: 'อ่านข้อมูล field จาก Jira ไม่สำเร็จ — ลองใหม่อีกครั้ง' }
+  }
+  const byId = new Map(metas.map(m => [m.id, m]))
+  const payload: Record<string, unknown> = {}
+  const changes: Record<string, { from: string; to: string }> = {}
+
+  for (const [fieldId, v] of Object.entries(input)) {
+    const m = byId.get(fieldId)
+    if (!m) return { ok: false, message: `ไม่อนุญาตให้แก้ field นี้ (${fieldId})` }
+
+    let to = ''
+    if (v === null) {
+      payload[fieldId] = m.kind === 'multi-option' ? [] : null
+    } else if (m.kind === 'text') {
+      const t = (v as { text?: unknown }).text
+      if (typeof t !== 'string') return { ok: false, message: `ค่าของ ${m.name} ไม่ถูกต้อง` }
+      const trimmed = t.trim()
+      if (trimmed.length > 255) return { ok: false, message: `${m.name}: ยาวเกิน 255 ตัวอักษร` }
+      payload[fieldId] = trimmed ? trimmed : null
+      to = trimmed
+    } else if (m.kind === 'multi-option') {
+      const ids = (v as { ids?: unknown }).ids
+      if (!Array.isArray(ids)) return { ok: false, message: `ค่าของ ${m.name} ไม่ถูกต้อง` }
+      const chosen = ids.map(String).map(id => m.options.find(o => o.id === id))
+      if (chosen.some(o => !o)) return { ok: false, message: `${m.name}: มีตัวเลือกที่ Jira ไม่รองรับ` }
+      payload[fieldId] = chosen.map(o => ({ id: o!.id }))
+      to = chosen.map(o => o!.value).join(', ')
+    } else {
+      const id = String((v as { id?: unknown }).id ?? '')
+      const opt = m.options.find(o => o.id === id)
+      if (!opt) return { ok: false, message: `${m.name}: ตัวเลือกนี้ Jira ไม่รองรับ` }
+      to = opt.value
+      if (m.kind === 'option-with-child') {
+        const childId = (v as { childId?: unknown }).childId
+        if (childId !== undefined && childId !== '') {
+          const child = opt.children?.find(c => c.id === String(childId))
+          if (!child) return { ok: false, message: `${m.name}: ตัวเลือกย่อยไม่ถูกต้อง` }
+          payload[fieldId] = { id: opt.id, child: { id: child.id } }
+          to = `${opt.value} › ${child.value}`
+        } else {
+          payload[fieldId] = { id: opt.id }
+        }
+      } else {
+        payload[fieldId] = { id: opt.id }
+      }
+    }
+    changes[m.name] = { from: m.currentLabel, to }
+  }
+  return { ok: true, payload, changes }
+}
+
 // ── Deploy Date → value Jira accepts ─────────────────────────────
 // Returns "YYYY-MM-DD" (valid real date), null (clear the field),
 // or undefined (invalid input — caller should skip and warn).
@@ -509,7 +661,8 @@ export function normalizeDeployDate(v: string | null): string | null | undefined
 // Returns which parts succeeded/failed so the caller can report clearly.
 export async function pushTicketUpdateToJira(
   key: string,
-  input: JiraUpdateInput
+  input: JiraUpdateInput,
+  extraFields?: Record<string, unknown>, // already validated by prepareExtraFieldUpdate() — never taken from the request body
 ): Promise<{ ok: boolean; warnings: string[] }> {
   const warnings: string[] = []
 
@@ -536,6 +689,8 @@ export async function pushTicketUpdateToJira(
       fields[WRITE_FIELD_IDS.deployDate] = d
     }
   }
+
+  if (extraFields) Object.assign(fields, extraFields)
 
   if (Object.keys(fields).length > 0) {
     try {

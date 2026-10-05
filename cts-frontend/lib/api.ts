@@ -64,6 +64,31 @@ export async function deleteReport(id: string) {
 }
 
 // ── Update a ticket + sync to Jira ───────────────────────────
+// ── Action Card / Type / Task Type (dropdowns whose options come from Jira) ──
+export interface ExtraFieldOption { id: string; value: string; children?: Array<{ id: string; value: string }> }
+export interface ExtraFieldMeta {
+  id: string
+  name: string
+  kind: 'option' | 'option-with-child' | 'multi-option' | 'text'
+  required: boolean
+  options: ExtraFieldOption[]
+  current: { id?: string; childId?: string; ids?: string[]; text?: string }
+  currentLabel: string
+}
+// null = clear the field
+export type ExtraFieldInput = { id: string; childId?: string } | { ids: string[] } | { text: string } | null
+
+export interface TicketCustomFields {
+  fields: ExtraFieldMeta[]
+  missing: string[]
+  error?: string
+}
+
+export async function getTicketCustomFields(reportId: string, key: string): Promise<TicketCustomFields> {
+  const { data } = await api.get(`/api/reports/${reportId}/tickets/${key}/custom-fields`)
+  return data as TicketCustomFields
+}
+
 export interface TicketUpdateInput {
   businessUnit?: string
   typeOfIssue?: string
@@ -71,6 +96,7 @@ export interface TicketUpdateInput {
   resolution?: string
   deployDate?: string | null // "YYYY-MM-DD"; '' or null = clear
   transitionResolution?: string // Jira's built-in Resolution, when the status change requires one
+  customFields?: Record<string, ExtraFieldInput> // keyed by Jira field id
   status?: string
 }
 

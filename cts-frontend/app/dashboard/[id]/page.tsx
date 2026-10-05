@@ -4,7 +4,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import api from '@/lib/api'
-import { updateTicket, getTicketTransitions, type BulkUpdateResponse, type TransitionRequirement } from '@/lib/api'
+import {
+  updateTicket, getTicketTransitions, getTicketCustomFields,
+  type BulkUpdateResponse, type TransitionRequirement,
+  type ExtraFieldMeta, type ExtraFieldInput, type TicketUpdateInput,
+} from '@/lib/api'
 import { getTicketActivity, addTicketComment, type TicketComment, type TicketChangelogEntry } from '@/lib/api'
 import { getTicketAttachments, downloadTicketAttachment, fetchAttachmentBlobUrl, fetchAttachmentText, type TicketAttachment } from '@/lib/api'
 import ThemeToggle from '@/components/theme/ThemeToggle'
@@ -689,6 +693,30 @@ const TYPE_OF_ISSUE_OPTIONS = [
   'Other', 'Monitor', 'Referral', 'Bug Issue', 'Alert', 'Q&A',
 ]
 
+// Draft value of one extra dropdown field while editing
+interface ExtraDraft { id: string; childId: string; ids: string[]; text: string }
+function draftFromMeta(f: ExtraFieldMeta): ExtraDraft {
+  return { id: f.current.id ?? '', childId: f.current.childId ?? '', ids: f.current.ids ?? [], text: f.current.text ?? '' }
+}
+// null = unchanged; otherwise the value to send (null inside = clear the field)
+function extraChange(f: ExtraFieldMeta, d: ExtraDraft): { send: ExtraFieldInput } | null {
+  if (f.kind === 'text') {
+    if (d.text.trim() === (f.current.text ?? '').trim()) return null
+    return { send: d.text.trim() ? { text: d.text.trim() } : null }
+  }
+  if (f.kind === 'multi-option') {
+    const cur = [...(f.current.ids ?? [])].sort().join(',')
+    const now = [...d.ids].sort().join(',')
+    if (cur === now) return null
+    return { send: d.ids.length ? { ids: d.ids } : null }
+  }
+  const curId = f.current.id ?? ''
+  const curChild = f.current.childId ?? ''
+  if (d.id === curId && (f.kind !== 'option-with-child' || d.childId === curChild)) return null
+  if (!d.id) return { send: null }
+  return { send: f.kind === 'option-with-child' && d.childId ? { id: d.id, childId: d.childId } : { id: d.id } }
+}
+
 function TicketDetailModal({
   ticket, reportId, onClose, onUpdated,
 }: {
@@ -707,6 +735,24 @@ function TicketDetailModal({
   const [statusNote, setStatusNote] = useState('')
   const [transitionDetails, setTransitionDetails] = useState<Record<string, TransitionRequirement>>({})
   const [transitionResolution, setTransitionResolution] = useState('')
+
+  // Action Card / Type / Task Type — loaded from Jira (options + current values), editors only
+  const [extra, setExtra] = useState<ExtraFieldMeta[] | null>(null)
+  const [extraDraft, setExtraDraft] = useState<Record<string, ExtraDraft>>({})
+  const [extraMissing, setExtraMissing] = useState<string[]>([])
+  const [extraError, setExtraError] = useState('')
+  const loadExtra = useCallback(() => {
+    if (!canEdit) return
+    getTicketCustomFields(reportId, ticket.key)
+      .then(r => {
+        setExtra(r.fields)
+        setExtraMissing(r.missing)
+        setExtraError(r.error ?? '')
+        setExtraDraft(Object.fromEntries(r.fields.map(f => [f.id, draftFromMeta(f)])))
+      })
+      .catch(() => { setExtra([]); setExtraError('ดึงข้อมูล Action Card / Type / Task Type จาก Jira ไม่สำเร็จ') })
+  }, [canEdit, reportId, ticket.key])
+  useEffect(() => { loadExtra() }, [loadExtra])
 
   const [draft, setDraft] = useState({
     businessUnit: ticket.businessUnit || '',
@@ -732,6 +778,7 @@ function TicketDetailModal({
     setStatusNote('')
     setTransitionDetails({})
     setTransitionResolution('')
+    if (extra) setExtraDraft(Object.fromEntries(extra.map(f => [f.id, draftFromMeta(f)])))
     setEditing(true)
     getTicketTransitions(reportId, ticket.key)
       .then(t => {
@@ -759,20 +806,28 @@ function TicketDetailModal({
       if (draft.resolution   !== (ticket.resolution || ''))   changed.resolution   = draft.resolution
       if (draft.deployDate   !== toDateInput(ticket.deployDate)) changed.deployDate = draft.deployDate // '' = clear in Jira
 
-      if (Object.keys(changed).length === 0) {
+      const customChanged: Record<string, ExtraFieldInput> = {}
+      for (const f of extra ?? []) {
+        const c = extraChange(f, extraDraft[f.id] ?? draftFromMeta(f))
+        if (c) customChanged[f.id] = c.send
+      }
+
+      if (Object.keys(changed).length === 0 && Object.keys(customChanged).length === 0) {
         setEditing(false)
         setSaving(false)
         return
       }
 
       const statusReq = changed.status ? transitionDetails[changed.status] : undefined
-      const payload: Record<string, string> = { ...changed }
+      const payload: TicketUpdateInput = { ...changed }
+      if (Object.keys(customChanged).length > 0) payload.customFields = customChanged
       if (statusReq?.resolutionOptions?.length) {
         payload.transitionResolution = transitionResolution || statusReq.resolutionDefault || statusReq.resolutionOptions[0]
       }
       const result = await updateTicket(reportId, ticket.key, payload)
       onUpdated({ ...ticket, ...result.ticket })
       if (result.warnings.length > 0) setWarnings(result.warnings)
+      if (Object.keys(customChanged).length > 0) loadExtra() // refresh "current" values from Jira
       setEditing(false)
     } catch (e: unknown) {
       const msg = (e as { response?: { data?: { message?: string } } })?.response?.data?.message ?? 'บันทึกไม่สำเร็จ'
@@ -947,6 +1002,70 @@ function TicketDetailModal({
               )}
             </div>
           </div>
+
+          {canEdit && (extra === null || extra.length > 0 || extraMissing.length > 0 || extraError) && (
+            <div className="rounded-xl border border-slate-200 dark:border-slate-700 p-3 space-y-3">
+              <p className="text-xs font-semibold text-slate-500 dark:text-slate-400">ข้อมูลใน Jira ที่บาง workflow บังคับให้กรอกก่อนเปลี่ยนสถานะ</p>
+              {extra === null && <div className="h-10 animate-pulse rounded-lg bg-slate-100 dark:bg-slate-700" />}
+              {extraError && <p className="text-[11px] text-orange-600 dark:text-orange-400">{extraError}</p>}
+              <div className="grid grid-cols-2 gap-3">
+                {(extra ?? []).map(f => {
+                  const d = extraDraft[f.id] ?? draftFromMeta(f)
+                  const setD = (patch: Partial<ExtraDraft>) => setExtraDraft(prev => ({ ...prev, [f.id]: { ...(prev[f.id] ?? draftFromMeta(f)), ...patch } }))
+                  const selCls = 'w-full rounded-lg border border-blue-400 bg-white dark:bg-slate-700 px-2 py-1.5 text-xs text-slate-800 dark:text-slate-100 outline-none'
+                  const parent = f.options.find(o => o.id === d.id)
+                  return (
+                    <div key={f.id} className={f.kind === 'multi-option' ? 'col-span-2' : ''}>
+                      <p className="text-xs font-medium text-slate-400 mb-1">{f.name}{f.required && <span className="text-red-400"> *</span>}</p>
+                      {!editing ? (
+                        f.currentLabel
+                          ? <p className="text-sm text-slate-700 dark:text-slate-200">{f.currentLabel}</p>
+                          : <p className="text-sm text-orange-500 dark:text-orange-400">ยังไม่ได้ระบุ</p>
+                      ) : f.kind === 'text' ? (
+                        <input
+                          type="text"
+                          value={d.text}
+                          maxLength={255}
+                          onChange={e => setD({ text: e.target.value })}
+                          className={selCls}
+                        />
+                      ) : f.kind === 'multi-option' ? (
+                        <div className="flex flex-wrap gap-x-4 gap-y-1">
+                          {f.options.map(o => (
+                            <label key={o.id} className="flex items-center gap-1.5 text-xs text-slate-700 dark:text-slate-200 cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={d.ids.includes(o.id)}
+                                onChange={e => setD({ ids: e.target.checked ? [...d.ids, o.id] : d.ids.filter(x => x !== o.id) })}
+                                className="h-3.5 w-3.5 rounded border-slate-300"
+                              />
+                              {o.value}
+                            </label>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="space-y-1.5">
+                          <select value={d.id} onChange={e => setD({ id: e.target.value, childId: '' })} className={selCls}>
+                            <option value="">— ไม่ระบุ —</option>
+                            {f.options.map(o => <option key={o.id} value={o.id}>{o.value}</option>)}
+                          </select>
+                          {f.kind === 'option-with-child' && parent?.children && parent.children.length > 0 && (
+                            <select value={d.childId} onChange={e => setD({ childId: e.target.value })} className={selCls}>
+                              <option value="">— ไม่ระบุ —</option>
+                              {parent.children.map(c => <option key={c.id} value={c.id}>{c.value}</option>)}
+                            </select>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+              {extraMissing.length > 0 && (
+                <p className="text-[11px] text-slate-400">ไม่พบ field ในหน้าแก้ไขของ Jira (หรือไม่รองรับชนิดนี้): {extraMissing.join(', ')}</p>
+              )}
+            </div>
+          )}
 
           <div className="rounded-xl bg-red-50 dark:bg-red-950/30 border border-red-100 dark:border-red-900/50 p-4">
             <p className="text-xs font-semibold text-red-700 dark:text-red-400 mb-1.5 flex items-center gap-1.5">
