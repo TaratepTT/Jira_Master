@@ -131,6 +131,7 @@ export interface TicketTransitions {
   current: string
   allowed: string[]
   details?: Record<string, TransitionRequirement>
+  queued?: Record<string, string[]>   // status -> steps the app will run one after another to get there
   error?: string
 }
 

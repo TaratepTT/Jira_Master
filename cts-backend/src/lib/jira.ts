@@ -262,9 +262,38 @@ export interface AllowedStatusInfo {
 // they don't count as "needs" even if the transition screen lists them as required.
 const FILLED_BY_APP = new Set(['customfield_10207', 'customfield_10169', 'customfield_10079', 'customfield_10053', 'customfield_10185'])
 
+// ── The "closing lane": a forward-only chain of statuses ─────────
+// From the workflow diagram:  ... -> Resolved -> CLOSING -> Closed
+// Jira only shows the NEXT step(s) from the current status, so to reach Closed from e.g.
+// L2-IN PROGRESS the app queues the steps one after another (each one is a real Jira
+// transition, with the same checks as doing it by hand). Edit this list if the workflow changes.
+// Moves are forward-only: the app never goes backwards, so tickets are never re-opened this way.
+export const CLOSING_LANE = ['Resolved', 'CLOSING', 'Closed']
+const sameStatus = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase()
+const laneIndex = (name: string) => CLOSING_LANE.findIndex(l => sameStatus(l, name))
+
+// Path to `target` starting from one of the transitions available right now, or null if the
+// target is not in the lane / no lane step is reachable. Path = ordered status names to pass through.
+function planQueuedPath(transitions: JiraTransition[], target: string): string[] | null {
+  const ti = laneIndex(target)
+  if (ti < 0) return null
+  let best: { idx: number; name: string } | null = null
+  for (const t of transitions) {
+    const idx = laneIndex(t.to.name)
+    if (idx >= 0 && idx < ti && (!best || idx > best.idx)) best = { idx, name: t.to.name }
+  }
+  if (!best) return null
+  return [best.name, ...CLOSING_LANE.slice(best.idx + 1, ti + 1)]
+}
+
 // Statuses this ticket can move to RIGHT NOW, as allowed by the Jira workflow for the
 // account that owns the API token. Used to fill the Status dropdown.
-export async function fetchAllowedStatuses(key: string): Promise<{ allowed: string[]; details: Record<string, AllowedStatusInfo> }> {
+// `queued` = further lane statuses that can be reached by chaining several moves.
+export async function fetchAllowedStatuses(key: string): Promise<{
+  allowed: string[]
+  details: Record<string, AllowedStatusInfo>
+  queued: Record<string, string[]>
+}> {
   const transitions = await getTransitions(key)
   const allowed = Array.from(new Set(transitions.map(t => t.to.name).filter(Boolean)))
   const details: Record<string, AllowedStatusInfo> = {}
@@ -281,7 +310,13 @@ export async function fetchAllowedStatuses(key: string): Promise<{ allowed: stri
     if (needs.length) info.needs = needs
     if (info.resolutionOptions || info.needs) details[t.to.name] = info
   }
-  return { allowed, details }
+  const queued: Record<string, string[]> = {}
+  for (const lane of CLOSING_LANE) {
+    if (allowed.some(a => sameStatus(a, lane))) continue // already one click away
+    const path = planQueuedPath(transitions, lane)
+    if (path) queued[lane] = path
+  }
+  return { allowed, details, queued }
 }
 
 // Turn Jira's error body into one readable line: field errors use the field's display name.
@@ -399,7 +434,7 @@ async function transitionIssueToStatus(
   key: string,
   targetStatusName: string,
   resolutionChoice?: string,
-): Promise<{ ok: boolean; message?: string }> {
+): Promise<{ ok: boolean; message?: string; toName?: string }> {
   const transitions = await getTransitions(key)
 
   const match = transitions.find(
@@ -459,7 +494,7 @@ async function transitionIssueToStatus(
     }
   }
 
-  if (await attempt(fields)) return { ok: true }
+  if (await attempt(fields)) return { ok: true, toName: match.to.name }
 
   let reason = describeJiraError(lastErr?.data, screen)
   const isEmptyValidator = /must not be left empty/i.test(reason)
@@ -467,7 +502,7 @@ async function transitionIssueToStatus(
   // The validator also wants Jira's built-in Resolution, which is on the screen but not marked required.
   if (isEmptyValidator && resField && !fields.resolution && /\bresolution\b/i.test(reason)) {
     const r = resolutionValue()
-    if (r && await attempt({ ...fields, resolution: r })) return { ok: true }
+    if (r && await attempt({ ...fields, resolution: r })) return { ok: true, toName: match.to.name }
     reason = describeJiraError(lastErr?.data, screen)
   }
 
@@ -476,7 +511,7 @@ async function transitionIssueToStatus(
   if (!isEmptyValidator && Object.keys(echo).length > 0) {
     const plain: Record<string, unknown> = {}
     if (fields.resolution) plain.resolution = fields.resolution
-    if (await attempt(plain)) return { ok: true }
+    if (await attempt(plain)) return { ok: true, toName: match.to.name }
     reason = describeJiraError(lastErr?.data, screen)
   }
 
@@ -642,6 +677,47 @@ export async function prepareExtraFieldUpdate(
   return { ok: true, payload, changes }
 }
 
+// ── Move a ticket to a status, queuing several transitions when needed ──
+// Direct move when Jira offers it; otherwise, for statuses on the closing lane, the steps
+// are executed one by one (re-reading Jira's allowed transitions before every step).
+// If a step fails the queue STOPS there and reports exactly which status was reached.
+async function moveToStatus(
+  key: string,
+  target: string,
+  resolutionChoice?: string,
+): Promise<{ ok: boolean; message?: string; finalStatus?: string; path: string[] }> {
+  const transitions = await getTransitions(key)
+  const direct = transitions.some(t => sameStatus(t.to.name, target) || sameStatus(t.name, target))
+
+  if (direct) {
+    const r = await transitionIssueToStatus(key, target, resolutionChoice)
+    return { ok: r.ok, message: r.message, finalStatus: r.toName, path: r.toName ? [r.toName] : [] }
+  }
+
+  const plan = planQueuedPath(transitions, target)
+  if (!plan) {
+    // Not directly allowed and not on a known queue: same explanation as before
+    const r = await transitionIssueToStatus(key, target, resolutionChoice)
+    return { ok: r.ok, message: r.message, finalStatus: r.toName, path: r.toName ? [r.toName] : [] }
+  }
+
+  const reached: string[] = []
+  for (const step of plan) {
+    const r = await transitionIssueToStatus(key, step, resolutionChoice)
+    if (!r.ok) {
+      const where = reached.length ? `ไปถึง "${reached[reached.length - 1]}" แล้ว แต่` : 'ยังไม่ได้เริ่มเปลี่ยน —'
+      return {
+        ok: false,
+        finalStatus: reached[reached.length - 1],
+        path: reached,
+        message: `คิวเปลี่ยนสถานะไป "${target}" (${plan.join(' → ')}) หยุดที่ขั้น "${step}": ${where} ${r.message ?? 'Jira ไม่อนุญาต'}`,
+      }
+    }
+    reached.push(r.toName ?? step)
+  }
+  return { ok: true, finalStatus: reached[reached.length - 1], path: reached }
+}
+
 // ── Deploy Date → value Jira accepts ─────────────────────────────
 // Returns "YYYY-MM-DD" (valid real date), null (clear the field),
 // or undefined (invalid input — caller should skip and warn).
@@ -663,8 +739,10 @@ export async function pushTicketUpdateToJira(
   key: string,
   input: JiraUpdateInput,
   extraFields?: Record<string, unknown>, // already validated by prepareExtraFieldUpdate() — never taken from the request body
-): Promise<{ ok: boolean; warnings: string[] }> {
+): Promise<{ ok: boolean; warnings: string[]; finalStatus?: string; statusPath?: string[] }> {
   const warnings: string[] = []
+  let finalStatus: string | undefined
+  let statusPath: string[] | undefined
 
   // 1) Plain/select fields (Business Unit, Type of Issue, Root Cause, Resolution, Deploy Date)
   const fields: Record<string, unknown> = {}
@@ -702,11 +780,13 @@ export async function pushTicketUpdateToJira(
 
   // 2) Status — requires a workflow transition, handled separately
   if (input.status) {
-    const result = await transitionIssueToStatus(key, input.status, input.transitionResolution)
+    const result = await moveToStatus(key, input.status, input.transitionResolution)
     if (!result.ok && result.message) warnings.push(result.message)
+    finalStatus = result.finalStatus // set whenever at least one move succeeded (even if the queue stopped midway)
+    statusPath = result.path
   }
 
-  return { ok: warnings.length === 0, warnings }
+  return { ok: warnings.length === 0, warnings, finalStatus, statusPath }
 }
 
 // ══════════════════════════════════════════════════════════════

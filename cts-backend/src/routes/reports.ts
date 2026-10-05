@@ -98,8 +98,8 @@ router.get('/:id/tickets/:key/transitions', requireRole('editor', 'admin'), asyn
       return
     }
     try {
-      const { allowed, details } = await fetchAllowedStatuses(key)
-      res.json({ current: ticket.status, allowed, details })
+      const { allowed, details, queued } = await fetchAllowedStatuses(key)
+      res.json({ current: ticket.status, allowed, details, queued })
     } catch (err) {
       console.error(`[jira] transitions failed for ${key}:`, err instanceof Error ? err.message : err)
       res.json({ current: ticket.status, allowed: [], error: 'ดึงรายการสถานะที่เปลี่ยนได้จาก Jira ไม่สำเร็จ' })
@@ -167,7 +167,7 @@ router.patch('/:id/tickets/:key', requireRole('editor', 'admin'), async (req: Re
     delete (input as { customFields?: unknown }).customFields
 
     // 1) Push changes to Jira first — this is the source of truth
-    const { ok, warnings } = await pushTicketUpdateToJira(key, input, extraPayload)
+    const { ok, warnings, finalStatus, statusPath } = await pushTicketUpdateToJira(key, input, extraPayload)
 
     // 2) Update local DB regardless, so the Dashboard reflects the edit
     //    immediately even if some Jira fields failed (warnings shown to user)
@@ -181,13 +181,12 @@ router.patch('/:id/tickets/:key', requireRole('editor', 'admin'), async (req: Re
       if (!dd) dbUpdate.deployDate = null
       else if (/^\d{4}-\d{2}-\d{2}/.test(dd)) dbUpdate.deployDate = dd.slice(0, 10)
     }
-    if (input.status       !== undefined && ok) dbUpdate.status = input.status
+    // Status: store what Jira REALLY ended on — if a queued move stopped midway, that is the intermediate status
+    if (finalStatus) dbUpdate.status = finalStatus
     // "Type of System" is also stored locally (standaloneCategory, shown in the CSV export)
     if (ok && extraChanges['Type of System'] !== undefined) dbUpdate.standaloneCategory = extraChanges['Type of System'].to || null
 
-    // What the user asked for (status is reported as requested even if Jira refused it)
     const requested: Record<string, unknown> = { ...dbUpdate }
-    if (input.status !== undefined) requested.status = input.status
     const changes: Record<string, { from: string; to: string }> = diffFields(
       {
         businessUnit: ticket.businessUnit, typeOfIssue: ticket.typeOfIssue, rootCause: ticket.rootCause,
@@ -208,7 +207,11 @@ router.patch('/:id/tickets/:key', requireRole('editor', 'admin'), async (req: Re
       reportId: id,
       ticketKey: key,
       summary: `แก้ไข ${key}: ${Object.keys(changes).join(', ') || 'ไม่มีการเปลี่ยนแปลง'}${ok ? '' : ' (Jira มีคำเตือน)'}`,
-      details: { changes, warnings, jiraOk: ok, ...(input.transitionResolution ? { transitionResolution: input.transitionResolution } : {}) },
+      details: {
+        changes, warnings, jiraOk: ok,
+        ...(input.transitionResolution ? { transitionResolution: input.transitionResolution } : {}),
+        ...(input.status ? { statusRequested: input.status, statusPath } : {}),
+      },
       success: ok,
     })
 

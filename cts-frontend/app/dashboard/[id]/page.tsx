@@ -734,6 +734,10 @@ function TicketDetailModal({
   const [allowedStatuses, setAllowedStatuses] = useState<string[] | null>(null)
   const [statusNote, setStatusNote] = useState('')
   const [transitionDetails, setTransitionDetails] = useState<Record<string, TransitionRequirement>>({})
+  // status -> ordered steps the app runs as a queue (e.g. Closed: Resolved → CLOSING → Closed)
+  const [queuedPaths, setQueuedPaths] = useState<Record<string, string[]>>({})
+  // The requirements (Resolution picker, extra fields) belong to the FIRST step of a queue
+  const reqKey = (st: string) => queuedPaths[st]?.[0] ?? st
   const [transitionResolution, setTransitionResolution] = useState('')
 
   // Action Card / Type / Task Type — loaded from Jira (options + current values), editors only
@@ -777,6 +781,7 @@ function TicketDetailModal({
     setAllowedStatuses(null)
     setStatusNote('')
     setTransitionDetails({})
+    setQueuedPaths({})
     setTransitionResolution('')
     if (extra) setExtraDraft(Object.fromEntries(extra.map(f => [f.id, draftFromMeta(f)])))
     setEditing(true)
@@ -784,6 +789,7 @@ function TicketDetailModal({
       .then(t => {
         setAllowedStatuses(t.allowed)
         setTransitionDetails(t.details ?? {})
+        setQueuedPaths(t.queued ?? {})
         if (t.error) setStatusNote(t.error)
         else if (t.allowed.length === 0) setStatusNote('ไม่มีสถานะอื่นที่ Jira อนุญาตให้เปลี่ยนจากสถานะนี้ (workflow หรือสิทธิ์ของบัญชี)')
       })
@@ -818,7 +824,7 @@ function TicketDetailModal({
         return
       }
 
-      const statusReq = changed.status ? transitionDetails[changed.status] : undefined
+      const statusReq = changed.status ? transitionDetails[reqKey(changed.status)] : undefined
       const payload: TicketUpdateInput = { ...changed }
       if (Object.keys(customChanged).length > 0) payload.customFields = customChanged
       if (statusReq?.resolutionOptions?.length) {
@@ -899,7 +905,7 @@ function TicketDetailModal({
                     onChange={e => {
                       const st = e.target.value
                       setDraft(d => ({ ...d, status: st }))
-                      setTransitionResolution(transitionDetails[st]?.resolutionDefault ?? '')
+                      setTransitionResolution(transitionDetails[reqKey(st)]?.resolutionDefault ?? '')
                     }}
                     disabled={allowedStatuses === null}
                     className="w-full rounded-lg border border-blue-400 bg-white dark:bg-slate-700 px-2 py-1.5 text-xs text-slate-800 dark:text-slate-100 outline-none disabled:opacity-60"
@@ -907,24 +913,39 @@ function TicketDetailModal({
                     {[ticket.status, ...(allowedStatuses ?? []).filter(x => x !== ticket.status)].map(st => (
                       <option key={st} value={st}>{st === ticket.status ? `${st} (ปัจจุบัน)` : st}</option>
                     ))}
+                    {Object.keys(queuedPaths)
+                      .filter(st => st !== ticket.status && !(allowedStatuses ?? []).includes(st))
+                      .map(st => (
+                        <option key={st} value={st}>{`${st} (ผ่านคิว ${queuedPaths[st].length} ขั้น)`}</option>
+                      ))}
                   </select>
                   {allowedStatuses === null && <p className="mt-1 text-[11px] text-slate-400">กำลังดึงสถานะที่เปลี่ยนได้จาก Jira...</p>}
                   {statusNote && <p className="mt-1 text-[11px] text-orange-600 dark:text-orange-400">{statusNote}</p>}
-                  {draft.status !== ticket.status && transitionDetails[draft.status]?.resolutionOptions && (
+                  {queuedPaths[draft.status] && draft.status !== ticket.status && (
+                    <div className="mt-2 rounded-lg border border-indigo-200 dark:border-indigo-900/50 bg-indigo-50 dark:bg-indigo-950/20 px-2.5 py-2">
+                      <p className="text-[11px] font-medium text-indigo-700 dark:text-indigo-300">
+                        ระบบจะเปลี่ยนสถานะต่อเนื่องตามคิว: {[ticket.status, ...queuedPaths[draft.status]].join(' → ')}
+                      </p>
+                      <p className="mt-0.5 text-[11px] text-indigo-600/80 dark:text-indigo-300/70">
+                        แต่ละขั้นเขียนลง Jira จริงตามลำดับ ถ้าขั้นใดไม่ผ่าน (เช่น บัญชีไม่มีสิทธิ์) คิวจะหยุดที่ขั้นนั้นและ Dashboard จะแสดงสถานะที่ไปถึงจริง
+                      </p>
+                    </div>
+                  )}
+                  {draft.status !== ticket.status && transitionDetails[reqKey(draft.status)]?.resolutionOptions && (
                     <div className="mt-2">
                       <p className="text-[11px] font-medium text-slate-400 mb-1">Resolution ที่ Jira ต้องการสำหรับสถานะนี้</p>
                       <select
-                        value={transitionResolution || transitionDetails[draft.status].resolutionDefault || ''}
+                        value={transitionResolution || transitionDetails[reqKey(draft.status)].resolutionDefault || ''}
                         onChange={e => setTransitionResolution(e.target.value)}
                         className="w-full rounded-lg border border-blue-400 bg-white dark:bg-slate-700 px-2 py-1.5 text-xs text-slate-800 dark:text-slate-100 outline-none"
                       >
-                        {transitionDetails[draft.status].resolutionOptions!.map(o => <option key={o} value={o}>{o}</option>)}
+                        {transitionDetails[reqKey(draft.status)].resolutionOptions!.map(o => <option key={o} value={o}>{o}</option>)}
                       </select>
                     </div>
                   )}
-                  {draft.status !== ticket.status && transitionDetails[draft.status]?.needs && (
+                  {draft.status !== ticket.status && transitionDetails[reqKey(draft.status)]?.needs && (
                     <p className="mt-1.5 text-[11px] text-orange-600 dark:text-orange-400">
-                      Jira ต้องการข้อมูลเพิ่มสำหรับสถานะนี้: {transitionDetails[draft.status].needs!.join(', ')} — ถ้าบันทึกไม่ผ่าน ให้กรอกใน Jira โดยตรง
+                      Jira ต้องการข้อมูลเพิ่มสำหรับสถานะนี้: {transitionDetails[reqKey(draft.status)].needs!.join(', ')} — ถ้าบันทึกไม่ผ่าน ให้กรอกใน Jira โดยตรง
                     </p>
                   )}
                 </>
