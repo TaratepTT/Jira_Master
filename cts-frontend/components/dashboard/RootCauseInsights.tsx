@@ -63,6 +63,10 @@ export default function RootCauseInsights({ reportId }: { reportId: string }) {
   const preview = status?.preview
   const canRun = !!status?.enabled && !!preview && preview.willAnalyse >= 2 && status.dailyRemaining > 0
 
+  // Feature off (no ANTHROPIC_API_KEY on the server) or not yet known -> render nothing, for every role.
+  // The card appears on its own once the server has the key.
+  if (loading || !status?.enabled) return null
+
   return (
     <div className="rounded-2xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 p-5">
       <div className="flex items-center justify-between gap-3 flex-wrap mb-3">
