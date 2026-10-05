@@ -1000,7 +1000,7 @@ function TicketDetailModal({
           {warnings.length > 0 && (
             <div className="rounded-lg bg-orange-50 dark:bg-orange-950/30 border border-orange-200 dark:border-orange-900/50 px-3 py-2 space-y-1">
               {warnings.map((w, i) => (
-                <p key={i} className="text-xs text-orange-600 dark:text-orange-400">{w}</p>
+                <p key={i} className="text-xs text-orange-600 dark:text-orange-400 whitespace-pre-line break-words">{w}</p>
               ))}
             </div>
           )}

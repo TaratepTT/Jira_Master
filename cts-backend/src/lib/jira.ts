@@ -222,6 +222,7 @@ interface JiraTransitionField {
   name?: string
   hasDefaultValue?: boolean
   allowedValues?: Array<{ id?: string; name?: string; value?: string }>
+  schema?: { type?: string; items?: string; custom?: string; system?: string }
 }
 interface JiraTransition {
   id: string
@@ -293,6 +294,104 @@ function describeJiraError(data: unknown, fields?: Record<string, JiraTransition
   return parts.join(' | ')
 }
 
+// ── "Echo" the ticket's own values into the transition request ───
+// Many workflows have a validator ("The following fields must not be left empty: ...")
+// that looks at the values SUBMITTED with the transition, not the ones already stored on
+// the issue — so a ticket that is fully filled in still fails when the API call sends
+// nothing. We therefore read the current value of every custom field on the transition
+// screen and send it back unchanged (the Jira web UI does the same: its transition dialog
+// is pre-filled with the current values).
+function hasAdfText(n: unknown): boolean {
+  if (!n || typeof n !== 'object') return false
+  const o = n as { text?: unknown; content?: unknown; type?: unknown }
+  if (typeof o.text === 'string' && o.text.trim()) return true
+  if (o.type === 'media' || o.type === 'mediaSingle' || o.type === 'inlineCard') return true
+  return Array.isArray(o.content) && o.content.some(hasAdfText)
+}
+
+// Convert a value as READ from an issue into the shape Jira accepts when WRITING it.
+// Returns undefined for empty / unsupported values (those are not echoed).
+function toWritable(v: unknown): unknown {
+  if (v === null || v === undefined) return undefined
+  if (typeof v === 'string') return v.trim() ? v : undefined
+  if (typeof v === 'number' || typeof v === 'boolean') return v
+  if (Array.isArray(v)) {
+    const arr = v.map(toWritable).filter(x => x !== undefined)
+    return arr.length ? arr : undefined
+  }
+  if (typeof v === 'object') {
+    const o = v as Record<string, unknown>
+    if (o.type === 'doc') return hasAdfText(o) ? o : undefined
+    if (typeof o.accountId === 'string') return { accountId: o.accountId }
+    if (o.id !== undefined && o.id !== null) {
+      const out: Record<string, unknown> = { id: String(o.id) }
+      const child = toWritable(o.child)
+      if (child !== undefined) out.child = child
+      return out
+    }
+    if (typeof o.value === 'string' && o.value) return { value: o.value }
+  }
+  return undefined
+}
+
+const ECHO_SCALAR_TYPES = new Set(['string', 'number', 'date', 'datetime', 'option', 'option-with-child', 'user'])
+function isEchoable(id: string, f: JiraTransitionField): boolean {
+  if (!id.startsWith('customfield_')) return false
+  const t = f.schema?.type
+  if (!t) return false
+  if (t === 'array') return ['option', 'string', 'user'].includes(f.schema?.items ?? '')
+  return ECHO_SCALAR_TYPES.has(t)
+}
+
+async function fetchCurrentFieldValues(key: string, ids: string[]): Promise<Record<string, unknown>> {
+  if (!ids.length) return {}
+  try {
+    const { data } = await jiraClient.get(`/issue/${key}`, { params: { fields: ids.join(',') } })
+    return (data?.fields ?? {}) as Record<string, unknown>
+  } catch (err) {
+    console.error(`[jira] could not read current field values of ${key}:`, err instanceof Error ? err.message : err)
+    return {}
+  }
+}
+
+// Work out WHY a "must not be left empty" validator failed, in plain words:
+//   - fields that are really empty on the ticket  -> the user must fill them in Jira first
+//   - fields that are not on the transition screen -> this app cannot send them at all
+function explainEmptyFields(
+  reason: string,
+  screen: Record<string, JiraTransitionField>,
+  current: Record<string, unknown>,
+): string {
+  const seg = reason.split(' | ').find(x => /must not be left empty/i.test(x))
+  if (!seg) return ''
+  const list = seg.slice(seg.indexOf(':') + 1).replace(/\.\s*$/, '').trim()
+  if (!list) return ''
+
+  // Jira joins the last two names with "and", but a field can itself be called "A and B".
+  const tokens = list.split(/,\s*|\s+and\s+/).map(t => t.trim()).filter(Boolean)
+  const nameToId = new Map<string, string>()
+  for (const [id, f] of Object.entries(screen)) if (f.name) nameToId.set(f.name.toLowerCase(), id)
+  const names: string[] = []
+  const lastTwo = tokens.length >= 2 ? `${tokens[tokens.length - 2]} and ${tokens[tokens.length - 1]}` : ''
+  if (lastTwo && nameToId.has(lastTwo.toLowerCase())) {
+    names.push(...tokens.slice(0, -2), lastTwo)
+  } else {
+    names.push(...tokens)
+  }
+
+  const empty: string[] = []
+  const offScreen: string[] = []
+  for (const n of names) {
+    const id = nameToId.get(n.toLowerCase())
+    if (!id) { offScreen.push(n); continue }
+    if (toWritable(current[id]) === undefined) empty.push(n)
+  }
+  const out: string[] = []
+  if (empty.length) out.push(`ยังว่างอยู่ใน Jira — ต้องไปกรอกใน Jira ก่อน: ${empty.join(', ')}`)
+  if (offScreen.length) out.push(`ไม่อยู่ในหน้าจอ transition จึงส่งผ่านแอปไม่ได้: ${offScreen.join(', ')}`)
+  return out.join(' | ')
+}
+
 // ── Transition an issue to a target status by NAME ───────────────
 // Jira statuses are workflow-controlled — you can't just set a field,
 // you must find the transition that leads to the desired status.
@@ -316,26 +415,78 @@ async function transitionIssueToStatus(
     }
   }
 
-  // When the transition screen REQUIRES the built-in Resolution, send one.
-  const payload: { transition: { id: string }; fields?: Record<string, unknown> } = { transition: { id: match.id } }
-  const resField = match.fields?.resolution
-  if (resField?.required) {
+  const screen = match.fields ?? {}
+
+  // Built-in Resolution: pick the user's choice (or a sensible default) from Jira's own list.
+  const resField = screen.resolution
+  const resolutionValue = (): { name: string } | undefined => {
     const opts = optionNames(resField)
     const chosen = resolutionChoice && opts.includes(resolutionChoice) ? resolutionChoice : pickDefaultResolution(opts)
-    if (chosen) payload.fields = { resolution: { name: chosen } }
+    return chosen ? { name: chosen } : undefined
   }
 
-  try {
-    await jiraClient.post(`/issue/${key}/transitions`, payload)
-    return { ok: true }
-  } catch (err: unknown) {
-    const e = err as { response?: { status?: number; data?: unknown } }
-    console.error(`[jira] transition failed for ${key} -> ${match.to.name} (status ${e?.response?.status})`, JSON.stringify(e?.response?.data))
-    const reason = describeJiraError(e?.response?.data, match.fields)
-    return {
-      ok: false,
-      message: `เปลี่ยนสถานะเป็น "${match.to.name}" ใน Jira ไม่สำเร็จ${reason ? ` — Jira แจ้งว่า: ${reason}` : e?.response?.status ? ` (HTTP ${e.response.status})` : ''}`,
+  // Current values of the custom fields on the transition screen -> echoed back unchanged.
+  const echoIds = Object.entries(screen).filter(([id, f]) => isEchoable(id, f)).map(([id]) => id)
+  const current = await fetchCurrentFieldValues(key, echoIds)
+  const echo: Record<string, unknown> = {}
+  for (const id of echoIds) {
+    const w = toWritable(current[id])
+    if (w !== undefined) echo[id] = w
+  }
+
+  const post = (fields: Record<string, unknown>) =>
+    jiraClient.post(`/issue/${key}/transitions`, {
+      transition: { id: match.id },
+      ...(Object.keys(fields).length ? { fields } : {}),
+    })
+
+  const fields: Record<string, unknown> = { ...echo }
+  if (resField?.required) {
+    const r = resolutionValue()
+    if (r) fields.resolution = r
+  }
+
+  let lastErr: { status?: number; data?: unknown } | undefined
+  const attempt = async (f: Record<string, unknown>): Promise<boolean> => {
+    try {
+      await post(f)
+      return true
+    } catch (err: unknown) {
+      const e = err as { response?: { status?: number; data?: unknown } }
+      lastErr = { status: e?.response?.status, data: e?.response?.data }
+      console.error(`[jira] transition failed for ${key} -> ${match.to.name} (status ${lastErr.status})`, JSON.stringify(lastErr.data))
+      return false
     }
+  }
+
+  if (await attempt(fields)) return { ok: true }
+
+  let reason = describeJiraError(lastErr?.data, screen)
+  const isEmptyValidator = /must not be left empty/i.test(reason)
+
+  // The validator also wants Jira's built-in Resolution, which is on the screen but not marked required.
+  if (isEmptyValidator && resField && !fields.resolution && /\bresolution\b/i.test(reason)) {
+    const r = resolutionValue()
+    if (r && await attempt({ ...fields, resolution: r })) return { ok: true }
+    reason = describeJiraError(lastErr?.data, screen)
+  }
+
+  // An unrelated rejection while we were echoing values: fall back to the plain request,
+  // so a transition that always worked without extra fields keeps working.
+  if (!isEmptyValidator && Object.keys(echo).length > 0) {
+    const plain: Record<string, unknown> = {}
+    if (fields.resolution) plain.resolution = fields.resolution
+    if (await attempt(plain)) return { ok: true }
+    reason = describeJiraError(lastErr?.data, screen)
+  }
+
+  const explain = explainEmptyFields(reason, screen, current)
+  return {
+    ok: false,
+    message:
+      `เปลี่ยนสถานะเป็น "${match.to.name}" ใน Jira ไม่สำเร็จ` +
+      (reason ? ` — Jira แจ้งว่า: ${reason}` : lastErr?.status ? ` (HTTP ${lastErr.status})` : '') +
+      (explain ? `\n${explain}` : ''),
   }
 }
 
