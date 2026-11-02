@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { getReports, deleteReport } from '@/lib/api'
 import AppShell, { PageHeader } from '@/components/layout/AppShell'
+import BacklogPanel from '@/components/dashboard/BacklogPanel'
 import { useAuth } from '@/components/auth/AuthContext'
 
 interface Report {
@@ -82,6 +83,8 @@ export default function HomePage() {
           <span className="btn">เปิด Dashboard</span>
         </Link>
       )}
+
+      {!search && <BacklogPanel />}
 
       <section aria-labelledby="all-reports">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-3">

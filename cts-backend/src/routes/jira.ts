@@ -3,6 +3,7 @@ import { fetchJiraIssues, fetchJiraIssuesWithMeta, MAX_SYNC_ISSUES, testJiraConn
 import prisma from '../lib/prisma.js'
 import { recordAudit } from '../lib/audit.js'
 import { findCarryOver } from '../lib/carryover.js'
+import { invalidateKnownTickets } from '../lib/similar.js'
 import type { AuthedRequest } from '../middleware/requireAuth.js'
 
 const router = Router()
@@ -198,6 +199,7 @@ router.post('/confirm', async (req: Request, res: Response, next: NextFunction) 
       },
     })
 
+    invalidateKnownTickets()
     await recordAudit((req as AuthedRequest).user, {
       action: 'report.create', reportId: report.id,
       summary: `สร้าง report "${report.name}" (${tickets.length} tickets)`,
@@ -260,6 +262,7 @@ router.post('/sync', async (req: Request, res: Response, next: NextFunction) => 
       },
     })
 
+    invalidateKnownTickets()
     await recordAudit((req as AuthedRequest).user, {
       action: 'report.create', reportId: report.id,
       summary: `Sync report "${report.name}" (${issues.length} tickets)`,

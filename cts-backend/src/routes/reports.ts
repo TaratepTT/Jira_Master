@@ -12,6 +12,7 @@ import { fetchJiraAttachments, downloadJiraAttachment } from '../lib/jira.js'
 import { buildAggregations } from '../lib/aggregate.js'
 import { requireRole, type AuthedRequest } from '../middleware/requireAuth.js'
 import { currentJiraActor } from '../lib/jiraContext.js'
+import { knownTickets, findSimilar, topTexts, invalidateKnownTickets } from '../lib/similar.js'
 
 const router = Router()
 
@@ -46,6 +47,53 @@ router.get('/', async (_req: Request, res: Response, next: NextFunction) => {
     })
 
     res.json(reports)
+  } catch (err) {
+    next(err)
+  }
+})
+
+// ── GET /api/reports/backlog ──────────────────────────────────────
+// One row per report (oldest -> newest): how many tickets were still open when it was
+// synced / last refreshed. Each report is a snapshot of its own JQL, so this shows the
+// trend of what the team was carrying week by week.
+const BACKLOG_REPORTS = 26
+const finished = (s: string) => /closed|done|resolved|cancel|reject/i.test(s)
+const isL3 = (s: string) => /l3|investigate/i.test(s)
+
+router.get('/backlog', async (_req: Request, res: Response, next: NextFunction) => {
+  try {
+    const reports = await prisma.report.findMany({
+      orderBy: { createdAt: 'desc' },
+      take: BACKLOG_REPORTS,
+      select: { id: true, name: true, createdAt: true, refreshedAt: true },
+    })
+    const ids = reports.map(r => r.id)
+    const tickets = ids.length
+      ? await prisma.ticket.findMany({ where: { reportId: { in: ids } }, select: { reportId: true, status: true, ticketCreatedAt: true } })
+      : []
+    const byReport = new Map<string, typeof tickets>()
+    for (const t of tickets) {
+      const l = byReport.get(t.reportId)
+      if (l) l.push(t)
+      else byReport.set(t.reportId, [t])
+    }
+    const DAY = 864e5
+    const rows = reports.map(r => {
+      const list = byReport.get(r.id) ?? []
+      const asOf = (r.refreshedAt ?? r.createdAt).getTime()
+      const open = list.filter(t => !finished(t.status))
+      return {
+        id: r.id,
+        name: r.name,
+        date: (r.refreshedAt ?? r.createdAt).toISOString(),
+        total: list.length,
+        open: open.length,
+        closed: list.length - open.length,
+        l3: list.filter(t => isL3(t.status)).length,
+        over14: open.filter(t => t.ticketCreatedAt && (asOf - t.ticketCreatedAt.getTime()) / DAY > 14).length,
+      }
+    }).reverse()
+    res.json({ reports: rows })
   } catch (err) {
     next(err)
   }
@@ -129,6 +177,30 @@ router.get('/:id/tickets/:key/transitions', requireRole('editor', 'admin'), asyn
       console.error(`[jira] transitions failed for ${key}:`, err instanceof Error ? err.message : err)
       res.json({ current: ticket.status, live: liveStatus, allowed: [], error: 'ดึงรายการสถานะที่เปลี่ยนได้จาก Jira ไม่สำเร็จ', ...jiraIdentity() })
     }
+  } catch (err) {
+    next(err)
+  }
+})
+
+// ── GET /api/reports/:id/tickets/:key/assist ──────────────────────
+// Help for filling Root Cause / Resolution, from the app's own history (no AI, no cost):
+//   similar     : earlier tickets whose summary looks like this one, with what was written for them
+//   suggestions : the most used Root Cause / Resolution texts for the same Type of Issue
+router.get('/:id/tickets/:key/assist', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { id, key } = req.params
+    const ticket = await prisma.ticket.findFirst({ where: { reportId: id, key } })
+    if (!ticket) { res.status(404).json({ message: 'ไม่พบ ticket นี้ใน report' }); return }
+    const known = await knownTickets()
+    const type = typeof req.query.typeOfIssue === 'string' && req.query.typeOfIssue ? req.query.typeOfIssue : ticket.typeOfIssue
+    res.json({
+      similar: findSimilar({ key, summary: ticket.summary ?? '', typeOfIssue: ticket.typeOfIssue, system: ticket.system }, known),
+      suggestions: {
+        typeOfIssue: type || null,
+        rootCause: topTexts(known, 'rootCause', type || undefined),
+        resolution: topTexts(known, 'resolution', type || undefined),
+      },
+    })
   } catch (err) {
     next(err)
   }
@@ -226,6 +298,7 @@ router.patch('/:id/tickets/:key', requireRole('editor', 'admin'), async (req: Re
       where: { id: ticket.id },
       data: dbUpdate,
     })
+    if (dbUpdate.rootCause !== undefined || dbUpdate.resolution !== undefined) invalidateKnownTickets()
 
     await recordAudit(actor, {
       action: 'ticket.update',
@@ -330,6 +403,7 @@ router.post('/:id/refresh', requireRole('editor', 'admin'), async (req: Request,
     for (let i = 0; i < updates.length; i += CHUNK) {
       await prisma.$transaction(updates.slice(i, i + CHUNK).map(u => prisma.ticket.update({ where: { id: u.id }, data: u.data })))
     }
+    if (filled) invalidateKnownTickets()
     const refreshedAt = new Date()
     await prisma.report.update({ where: { id }, data: { refreshedAt } })
 
@@ -611,6 +685,7 @@ router.delete('/:id', requireRole('admin'), async (req: Request, res: Response, 
     }
 
     await prisma.report.delete({ where: { id } })
+    invalidateKnownTickets()
     await recordAudit((req as AuthedRequest).user, {
       action: 'report.delete', reportId: id,
       summary: `ลบ report "${exists.name}" (${exists.totalTickets} tickets)`,

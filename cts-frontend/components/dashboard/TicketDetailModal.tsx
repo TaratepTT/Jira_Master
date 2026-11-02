@@ -2,11 +2,12 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
-  updateTicket, getTicketTransitions, getTicketCustomFields,
+  updateTicket, getTicketTransitions, getTicketCustomFields, getTicketAssist, type TicketAssist,
   type TransitionRequirement, type ExtraFieldMeta, type ExtraFieldInput, type TicketUpdateInput, type JiraIdentity,
 } from '@/lib/api'
 import { useAuth } from '@/components/auth/AuthContext'
 import TicketActivityPanel from './TicketActivityPanel'
+import SimilarTickets from './SimilarTickets'
 import type { TicketDetail } from './types'
 import { TYPE_OF_ISSUE_OPTIONS, formatDate, jiraBrowseUrl, missingFields, statusBadge, toDateInput } from './utils'
 
@@ -74,6 +75,17 @@ export default function TicketDetailModal({
   // Whose Jira account the save will use (from the backend)
   const [identity, setIdentity] = useState<JiraIdentity | null>(null)
   const [savedNote, setSavedNote] = useState('')
+
+  // Similar earlier tickets + most used Root Cause / Resolution texts (from the app's own history)
+  const [assist, setAssist] = useState<TicketAssist | null>(null)
+  const [assistLoading, setAssistLoading] = useState(true)
+  const loadAssist = useCallback((typeOfIssue?: string) => {
+    getTicketAssist(reportId, ticket.key, typeOfIssue)
+      .then(setAssist)
+      .catch(() => setAssist(null))
+      .finally(() => setAssistLoading(false))
+  }, [reportId, ticket.key])
+  useEffect(() => { loadAssist() }, [loadAssist])
 
   // Action Card / Type / Task Type — loaded from Jira (options + current values), editors only
   const [extra, setExtra] = useState<ExtraFieldMeta[] | null>(null)
@@ -190,6 +202,20 @@ export default function TicketDetailModal({
     } finally {
       setSaving(false)
     }
+  }
+
+  // Suggestions follow the Type of Issue being chosen in the form
+  const lastType = useRef(ticket.typeOfIssue || '')
+  useEffect(() => {
+    if (!editing || draft.typeOfIssue === lastType.current) return
+    lastType.current = draft.typeOfIssue
+    loadAssist(draft.typeOfIssue || undefined)
+  }, [editing, draft.typeOfIssue, loadAssist])
+
+  // Copy text from a similar ticket into the form (opens edit mode when needed)
+  const applyFromSimilar = (patch: { rootCause?: string; resolution?: string }) => {
+    if (!editing) startEdit()
+    setDraft(d => ({ ...d, ...patch }))
   }
 
   // Fill-in queue: open the next ticket directly in edit mode
@@ -518,13 +544,45 @@ export default function TicketDetailModal({
                 {editing && <span className="text-[12px] font-normal text-faint">{hint}</span>}
               </label>
               {editing ? (
-                <textarea
-                  id={`f-${field}`}
-                  value={draft[field]}
-                  onChange={e => setDraft(d => ({ ...d, [field]: e.target.value }))}
-                  rows={4}
-                  className="field resize-y leading-relaxed"
-                />
+                <>
+                  <textarea
+                    id={`f-${field}`}
+                    value={draft[field]}
+                    onChange={e => setDraft(d => ({ ...d, [field]: e.target.value }))}
+                    rows={4}
+                    className="field resize-y leading-relaxed"
+                  />
+                  {(() => {
+                    const pool = assist?.suggestions[field]
+                    if (!pool?.items.length) return null
+                    const typed = draft[field].trim().toLowerCase()
+                    const items = pool.items
+                      .filter(i => i.text.trim().toLowerCase() !== typed && (!typed || i.text.toLowerCase().includes(typed)))
+                      .slice(0, 5)
+                    if (!items.length) return null
+                    return (
+                      <div className="mt-1.5">
+                        <p className="mb-1 text-[12px] text-faint">
+                          {typed ? 'ข้อความที่เคยใช้ซึ่งมีคำนี้' : pool.scope === 'type' && assist?.suggestions.typeOfIssue ? `ที่ใช้บ่อยกับ ${assist.suggestions.typeOfIssue}` : 'ที่ใช้บ่อย'}
+                        </p>
+                        <div className="flex flex-wrap gap-1.5">
+                          {items.map(i => (
+                            <button
+                              key={i.text}
+                              type="button"
+                              onClick={() => setDraft(d => ({ ...d, [field]: i.text }))}
+                              title={i.text}
+                              className="max-w-full truncate rounded-md border border-line bg-sunken px-2 py-1 text-left text-[12px] text-ink transition-colors hover:border-accent hover:bg-accent-soft"
+                            >
+                              {i.text.length > 80 ? `${i.text.slice(0, 80)}…` : i.text}
+                              <span className="ml-1.5 text-faint num">{i.count}</span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )
+                  })()}
+                </>
               ) : (
                 <p className="whitespace-pre-wrap text-[14px] leading-relaxed text-ink">
                   {ticket[field] || <span className="text-attention">ยังไม่ได้กรอก</span>}
@@ -532,6 +590,13 @@ export default function TicketDetailModal({
               )}
             </div>
           ))}
+
+          <SimilarTickets
+            items={assist?.similar ?? []}
+            loading={assistLoading}
+            canUse={canEdit}
+            onUse={applyFromSimilar}
+          />
 
           <TicketActivityPanel reportId={reportId} ticketKey={ticket.key} />
 

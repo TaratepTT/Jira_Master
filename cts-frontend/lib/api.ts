@@ -171,6 +171,36 @@ export async function refreshReportFromJira(reportId: string): Promise<RefreshRe
   return data as RefreshResult
 }
 
+// ── Help for filling Root Cause / Resolution (from earlier tickets, no AI) ─
+export interface SimilarTicket {
+  key: string
+  summary: string
+  rootCause: string
+  resolution: string
+  typeOfIssue: string
+  status: string
+  score: number
+  reportName: string
+}
+export interface TextSuggestions { scope: 'type' | 'all'; items: Array<{ text: string; count: number }> }
+export interface TicketAssist {
+  similar: SimilarTicket[]
+  suggestions: { typeOfIssue: string | null; rootCause: TextSuggestions; resolution: TextSuggestions }
+}
+
+export async function getTicketAssist(reportId: string, key: string, typeOfIssue?: string): Promise<TicketAssist> {
+  const { data } = await api.get(`/api/reports/${reportId}/tickets/${key}/assist`, { params: typeOfIssue ? { typeOfIssue } : undefined })
+  return data as TicketAssist
+}
+
+// ── Open tickets per report over time ─────────────────────────
+export interface BacklogPoint { id: string; name: string; date: string; total: number; open: number; closed: number; l3: number; over14: number }
+
+export async function getBacklog(): Promise<BacklogPoint[]> {
+  const { data } = await api.get('/api/reports/backlog')
+  return (data as { reports: BacklogPoint[] }).reports
+}
+
 // ── Per-user Jira account (Atlassian OAuth) ────────────────────
 export interface JiraConnectionStatus {
   enabled: boolean
