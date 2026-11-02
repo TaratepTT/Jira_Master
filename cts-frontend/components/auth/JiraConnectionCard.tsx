@@ -41,47 +41,47 @@ export default function JiraConnectionCard({ notice }: { notice?: string }) {
   }
 
   return (
-    <section className="rounded-2xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 p-5 space-y-3">
-      <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-200">บัญชี Jira ของฉัน</h2>
-      <p className="text-xs text-slate-500 dark:text-slate-400">
+    <section className="panel panel-pad space-y-3">
+      <h2 className="text-sm font-semibold text-ink">บัญชี Jira ของฉัน</h2>
+      <p className="text-xs text-muted">
         เมื่อเชื่อมแล้ว ทุกการแก้ไข / เปลี่ยนสถานะ / comment ที่ทำผ่าน Dashboard จะขึ้นใน Jira เป็นชื่อของคุณ
         และใช้สิทธิ์ workflow ของบัญชีคุณเอง (ถ้าไม่เชื่อม จะใช้บัญชีกลางของระบบ)
       </p>
 
       {st === null ? (
-        <div className="h-10 rounded-lg bg-slate-100 dark:bg-slate-700 animate-pulse" />
+        <div className="h-10 rounded-lg bg-sunken animate-pulse" />
       ) : !st.enabled ? (
-        <p className="rounded-lg bg-slate-50 dark:bg-slate-900/40 px-3 py-2 text-xs text-slate-500 dark:text-slate-400">
+        <p className="rounded-lg bg-sunken px-3 py-2 text-xs text-muted">
           ผู้ดูแลระบบยังไม่ได้เปิดใช้การเชื่อมบัญชี Jira (ต้องตั้งค่า ATLASSIAN_CLIENT_ID / ATLASSIAN_CLIENT_SECRET / ATLASSIAN_REDIRECT_URI ที่ backend)
         </p>
       ) : st.connected && st.account ? (
-        <div className="flex items-center justify-between gap-3 flex-wrap rounded-lg border border-green-200 dark:border-green-900/50 bg-green-50 dark:bg-green-950/20 px-3 py-2">
+        <div className="flex items-center justify-between gap-3 flex-wrap rounded-lg border border-line bg-sunken px-3 py-2">
           <div className="text-sm">
-            <p className="font-medium text-green-800 dark:text-green-300">เชื่อมต่อแล้ว: {st.account.displayName}</p>
-            <p className="text-xs text-green-700/80 dark:text-green-400/70">{st.account.email ?? ''} · {st.account.siteUrl}</p>
+            <p className="font-medium text-ok">เชื่อมต่อแล้ว: {st.account.displayName}</p>
+            <p className="text-xs text-muted">{[st.account.email, st.account.siteUrl].filter(Boolean).join(', ')}</p>
           </div>
-          <button onClick={disconnect} disabled={busy} className="rounded-lg border border-slate-300 dark:border-slate-600 px-3 py-1.5 text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-white dark:hover:bg-slate-700 disabled:opacity-50">
+          <button onClick={disconnect} disabled={busy} className="rounded-lg border border-line-strong px-3 py-1.5 text-xs font-medium text-muted hover:bg-white disabled:opacity-50">
             ยกเลิกการเชื่อมต่อ
           </button>
         </div>
       ) : (
         <div className="space-y-2">
           {st.needsReconnect && (
-            <p className="rounded-lg bg-orange-50 dark:bg-orange-950/20 border border-orange-200 dark:border-orange-900/50 px-3 py-2 text-xs text-orange-700 dark:text-orange-400">
+            <p className="rounded-lg bg-attention-soft border border-line px-3 py-2 text-xs text-attention">
               การเชื่อมต่อเดิม ({st.account?.displayName}) หมดอายุหรือถูกยกเลิก — ตอนนี้ใช้บัญชีกลางอยู่ กดเชื่อมต่อใหม่
             </p>
           )}
-          <button onClick={connect} disabled={busy} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50">
+          <button onClick={connect} disabled={busy} className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-on-accent hover:bg-accent-strong disabled:opacity-50">
             {busy ? 'กำลังไปที่ Atlassian...' : st.needsReconnect ? 'เชื่อมต่อใหม่' : 'เชื่อมบัญชี Jira'}
           </button>
         </div>
       )}
 
       {msg && (
-        <p className={`text-xs ${msg.ok ? 'text-green-700 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>{msg.text}</p>
+        <p className={`text-xs ${msg.ok ? 'text-ok' : 'text-danger'}`}>{msg.text}</p>
       )}
       {st?.connected && (
-        <p className="text-[11px] text-slate-400">
+        <p className="text-[11px] text-faint">
           การยกเลิกที่นี่จะลบ token ออกจากระบบ ถ้าต้องการถอนสิทธิ์ที่ฝั่ง Atlassian ด้วย ไปที่ id.atlassian.com → Connected apps
         </p>
       )}

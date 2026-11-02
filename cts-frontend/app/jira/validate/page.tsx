@@ -4,7 +4,7 @@ import { Fragment, Suspense, useEffect, useMemo, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import api from '@/lib/api'
-import ThemeToggle from '@/components/theme/ThemeToggle'
+import { AppNav, PageHeader } from '@/components/layout/AppShell'
 import { TYPE_OF_ISSUE_OPTIONS } from '@/components/dashboard/utils'
 
 // Value of a field found in an earlier report for the same ticket (Jira has it empty)
@@ -72,12 +72,14 @@ function revalidate(t: PreviewTicket, allKeys: string[]): PreviewTicket {
 
 // ── Inline editable text cell ──────────────────────────────────
 function EditableText({
-  value, onSave, placeholder, multiline,
+  value, onSave, placeholder, multiline, required,
 }: {
   value: string
   onSave: (v: string) => void
   placeholder?: string
   multiline?: boolean
+  /** empty value blocks saving -> show it in the attention colour; optional fields stay quiet */
+  required?: boolean
 }) {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(value)
@@ -102,7 +104,7 @@ function EditableText({
           if (e.key === 'Escape') { setDraft(value); setEditing(false) }
         }}
         rows={multiline ? 2 : undefined}
-        className="w-full min-w-[140px] rounded border border-blue-400 bg-white dark:bg-slate-700 px-1.5 py-1 text-xs text-slate-800 dark:text-slate-100 outline-none resize-none"
+        className="w-full min-w-[140px] rounded border border-accent bg-surface px-1.5 py-1 text-xs text-ink outline-none resize-none"
       />
     )
   }
@@ -110,10 +112,10 @@ function EditableText({
   return (
     <button
       onClick={() => setEditing(true)}
-      className="w-full text-left truncate hover:bg-blue-50 dark:hover:bg-blue-950/30 rounded px-1 py-0.5 -mx-1 transition-colors"
+      className="w-full text-left truncate hover:bg-accent-soft rounded px-1 py-0.5 -mx-1 transition-colors"
       title={value || placeholder}
     >
-      {value || <span className="text-red-400 dark:text-red-500 italic">{placeholder ?? 'ว่าง'}</span>}
+      {value || <span className={required ? 'text-attention' : 'text-faint'}>{placeholder ?? 'ว่าง'}</span>}
     </button>
   )
 }
@@ -136,7 +138,7 @@ function EditableSelect({
         value={value}
         onChange={e => { onSave(e.target.value); setEditing(false) }}
         onBlur={() => setEditing(false)}
-        className="w-full min-w-[120px] rounded border border-blue-400 bg-white dark:bg-slate-700 px-1.5 py-1 text-xs text-slate-800 dark:text-slate-100 outline-none"
+        className="w-full min-w-[120px] rounded border border-accent bg-surface px-1.5 py-1 text-xs text-ink outline-none"
       >
         <option value="">— เลือก —</option>
         {options.map(o => <option key={o} value={o}>{o}</option>)}
@@ -147,9 +149,9 @@ function EditableSelect({
   return (
     <button
       onClick={() => setEditing(true)}
-      className="w-full text-left truncate hover:bg-blue-50 dark:hover:bg-blue-950/30 rounded px-1 py-0.5 -mx-1 transition-colors"
+      className="w-full text-left truncate hover:bg-accent-soft rounded px-1 py-0.5 -mx-1 transition-colors"
     >
-      {value || <span className="text-red-400 dark:text-red-500 italic">{placeholder ?? 'ว่าง'}</span>}
+      {value || <span className="text-attention">{placeholder ?? 'ว่าง'}</span>}
     </button>
   )
 }
@@ -309,13 +311,14 @@ function ValidateScreenInner() {
 
   if (loadState.state === 'loading') {
     return (
-      <div className="min-h-screen bg-slate-50 dark:bg-slate-900 flex items-center justify-center">
-        <div className="text-center space-y-3">
-          <svg className="mx-auto h-8 w-8 animate-spin text-blue-500" fill="none" viewBox="0 0 24 24">
+      <div className="min-h-screen bg-paper">
+        <AppNav />
+        <div className="flex flex-col items-center justify-center gap-3 py-32 text-center">
+          <svg className="mx-auto h-6 w-6 animate-spin text-accent" fill="none" viewBox="0 0 24 24">
             <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
             <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
           </svg>
-          <p className="text-sm text-slate-500 dark:text-slate-400">กำลังดึงข้อมูลจาก Jira เพื่อตรวจสอบ...</p>
+          <p className="text-[14px] text-muted">กำลังดึง ticket จาก Jira มาให้ตรวจ</p>
         </div>
       </div>
     )
@@ -323,73 +326,62 @@ function ValidateScreenInner() {
 
   if (loadState.state === 'error') {
     return (
-      <div className="min-h-screen bg-slate-50 dark:bg-slate-900 flex items-center justify-center">
-        <div className="text-center space-y-3 max-w-sm px-4">
-          <p className="text-red-500 font-medium">{loadState.message}</p>
-          <Link href="/jira" className="text-sm text-blue-600 dark:text-blue-400 hover:underline">กลับไปหน้า Jira Sync</Link>
+      <div className="min-h-screen bg-paper">
+        <AppNav />
+        <div className="mx-auto max-w-sm space-y-3 px-4 py-32 text-center">
+          <p className="font-medium text-danger">{loadState.message}</p>
+          <Link href="/jira" className="link text-[14px]">กลับไปแก้เงื่อนไขการ sync</Link>
         </div>
       </div>
     )
   }
 
+  const ledger: Array<{ label: string; value: number; tone?: string }> = [
+    { label: 'ดึงมาทั้งหมด', value: tickets.length },
+    { label: 'ข้อมูลครบ', value: validCount, tone: 'text-ok' },
+    { label: 'ข้อมูลไม่ครบ', value: invalidCount, tone: invalidCount ? 'text-attention' : undefined },
+    { label: 'เลือกไว้จะบันทึก', value: selected.size, tone: 'text-accent' },
+  ]
+
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-900 transition-colors">
-      <header className="bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 sticky top-0 z-10">
-        <div className="mx-auto max-w-[1400px] px-4 sm:px-6 h-14 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <Link href="/jira" className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors">
-              <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18"/></svg>
-            </Link>
-            <div>
-              <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">ตรวจสอบข้อมูลก่อนสร้าง Dashboard</p>
-              <p className="text-xs text-slate-400 dark:text-slate-500">{reportName}</p>
+    <div className="min-h-screen bg-paper text-ink">
+      <AppNav />
+      <main className="mx-auto max-w-[1200px] px-4 py-8 sm:px-8 space-y-6">
+        <PageHeader
+          back={{ href: '/jira', label: 'แก้เงื่อนไขการ sync' }}
+          title="ตรวจข้อมูลก่อนบันทึก"
+          description={<>report: <span className="text-ink">{reportName}</span> คลิกช่องในตารางเพื่อแก้ ใบที่ข้อมูลครบจะถูกเลือกไว้ให้</>}
+        />
+
+        <dl className="grid grid-cols-2 overflow-hidden rounded-lg border border-line bg-surface sm:grid-cols-4">
+          {ledger.map((c, i) => (
+            <div key={c.label} className={`border-line px-4 py-3 ${i % 2 ? 'border-l' : ''} ${i >= 2 ? 'border-t sm:border-t-0' : ''} ${i === 2 ? 'sm:border-l' : ''}`}>
+              <dt className="text-[12px] text-muted">{c.label}</dt>
+              <dd className={`mt-1 text-[22px] font-semibold leading-none num ${c.tone ?? 'text-ink'}`} data-testid={`ledger-${i}`}>{c.value}</dd>
             </div>
-          </div>
-          <ThemeToggle />
-        </div>
-      </header>
-
-      <main className="mx-auto max-w-[1400px] px-4 sm:px-6 py-8 space-y-6">
-
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          <div className="rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 p-4">
-            <p className="text-2xl font-semibold text-slate-800 dark:text-slate-100">{tickets.length}</p>
-            <p className="text-xs text-slate-400 mt-0.5">ทั้งหมดที่ดึงมา</p>
-          </div>
-          <div className="rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 p-4">
-            <p className="text-2xl font-semibold text-green-600 dark:text-green-400">{validCount}</p>
-            <p className="text-xs text-slate-400 mt-0.5">ผ่านการตรวจสอบ</p>
-          </div>
-          <div className="rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 p-4">
-            <p className={`text-2xl font-semibold ${invalidCount ? 'text-red-600 dark:text-red-400' : 'text-slate-800 dark:text-slate-100'}`}>{invalidCount}</p>
-            <p className="text-xs text-slate-400 mt-0.5">มีข้อมูลไม่ครบ</p>
-          </div>
-          <div className="rounded-xl bg-blue-600 p-4">
-            <p className="text-2xl font-semibold text-white">{selected.size}</p>
-            <p className="text-xs text-blue-100 mt-0.5">เลือกไว้เพื่อบันทึก</p>
-          </div>
-        </div>
+          ))}
+        </dl>
 
         {truncation && (
-          <div className="rounded-xl border border-red-200 dark:border-red-900/50 bg-red-50 dark:bg-red-950/20 px-5 py-3">
-            <p className="text-sm text-red-800 dark:text-red-300">
-              <strong>ดึงข้อมูลได้ไม่ครบ</strong> — มี ticket ตรงเงื่อนไขมากกว่า {truncation.limit.toLocaleString()} รายการ ระบบดึงมาแค่ {truncation.limit.toLocaleString()} รายการแรก
+          <div className="rounded-lg border border-line bg-danger-soft px-4 py-3">
+            <p className="text-[14px] text-danger">
+              <strong>ดึงข้อมูลได้ไม่ครบ</strong> มี ticket ตรงเงื่อนไขมากกว่า {truncation.limit.toLocaleString()} รายการ ระบบดึงมาแค่ {truncation.limit.toLocaleString()} รายการแรก
               กลับไปแคบ JQL ให้เล็กลง (เช่น ช่วงวันที่สั้นลง) เพื่อให้ได้ข้อมูลครบ
             </p>
           </div>
         )}
 
         {carryFieldCount > 0 && (
-          <div className="rounded-xl border border-indigo-200 dark:border-indigo-900/50 bg-indigo-50 dark:bg-indigo-950/20 px-5 py-3 flex items-center justify-between gap-3 flex-wrap">
-            <p className="text-sm text-indigo-900 dark:text-indigo-200">
+          <div className="rounded-lg border border-line bg-surface px-4 py-3 flex items-center justify-between gap-3 flex-wrap">
+            <p className="text-[14px] text-ink">
               <strong>{carryTicketCount} tickets</strong> เคยกรอกข้อมูลไว้ใน report ก่อนหน้า ({carryFieldCount} ช่อง) แต่ใน Jira ยังว่าง
-              <span className="block text-xs text-indigo-700/80 dark:text-indigo-300/70 mt-0.5">
-                กดเติมเพื่อใช้ค่าเดิม (ค่าจะถูกบันทึกลง report ใหม่นี้ — ไม่ได้เขียนกลับเข้า Jira) · ดูทีละรายการได้จากปุ่ม ↺ ในตาราง
+              <span className="mt-0.5 block text-[13px] text-muted">
+                ค่าที่เติมจะบันทึกลง report ใหม่นี้ ไม่ได้เขียนกลับเข้า Jira ดูทีละใบได้จากปุ่ม ↺ ข้าง key
               </span>
             </p>
             <button
               onClick={applyAllCarry}
-              className="rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-700 transition-colors whitespace-nowrap"
+              className="btn-primary whitespace-nowrap"
             >
               เติมจาก report ก่อนหน้าทั้งหมด
             </button>
@@ -397,89 +389,76 @@ function ValidateScreenInner() {
         )}
 
         {invalidCount > 0 && (
-          <div className="rounded-xl border border-orange-200 dark:border-orange-900/50 bg-orange-50 dark:bg-orange-950/20 px-5 py-3 flex items-center justify-between gap-3 flex-wrap">
-            <p className="text-sm text-orange-800 dark:text-orange-300">
-              <strong>{invalidCount} tickets</strong> มีข้อมูลไม่ครบ — คลิกที่เซลล์เพื่อแก้ไขได้โดยตรง แล้วรายการจะย้ายไปกลุ่ม &quot;ผ่าน&quot; อัตโนมัติ
+          <div className="rounded-lg border border-line bg-surface px-4 py-3 flex items-center justify-between gap-3 flex-wrap">
+            <p className="flex items-start gap-3 text-[14px]">
+              <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-attention" aria-hidden />
+              <span><strong>{invalidCount} tickets</strong> ข้อมูลไม่ครบ คลิกช่องในตารางเพื่อแก้ แล้วใบนั้นจะย้ายไปกลุ่ม &quot;ข้อมูลครบ&quot; เอง</span>
             </p>
-            <button
-              onClick={() => setViewFilter('invalid')}
-              className="text-xs font-medium text-orange-700 dark:text-orange-400 underline whitespace-nowrap"
-            >
-              ดูเฉพาะรายการที่มีปัญหา
-            </button>
+            <button onClick={() => setViewFilter('invalid')} className="btn whitespace-nowrap">ดูเฉพาะใบที่ไม่ครบ</button>
           </div>
         )}
 
-        <div className="rounded-2xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 p-5 space-y-4">
-          <div className="flex items-center justify-between gap-3 flex-wrap">
-            <div className="flex items-center gap-2">
-              {(['all', 'valid', 'invalid'] as ViewFilter[]).map(f => (
-                <button
-                  key={f}
-                  onClick={() => setViewFilter(f)}
-                  className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
-                    viewFilter === f
-                      ? 'bg-blue-600 text-white'
-                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-700 dark:text-slate-300 dark:hover:bg-slate-600'
-                  }`}
-                >
-                  {f === 'all' ? `ทั้งหมด (${tickets.length})` : f === 'valid' ? `ผ่าน (${validCount})` : `มีปัญหา (${invalidCount})`}
-                </button>
-              ))}
-            </div>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex overflow-hidden rounded-md border border-line-strong text-[13px] font-medium" role="group" aria-label="แสดง">
+            {(['all', 'valid', 'invalid'] as ViewFilter[]).map(f => (
+              <button
+                key={f}
+                onClick={() => setViewFilter(f)}
+                aria-pressed={viewFilter === f}
+                className={`border-l border-line-strong px-3 py-1.5 first:border-l-0 transition-colors ${viewFilter === f ? 'bg-sunken text-ink' : 'bg-surface text-muted hover:text-ink'}`}
+              >
+                {f === 'all' ? 'ทั้งหมด' : f === 'valid' ? 'ข้อมูลครบ' : 'ไม่ครบ'} <span className="num text-faint">{f === 'all' ? tickets.length : f === 'valid' ? validCount : invalidCount}</span>
+              </button>
+            ))}
+          </div>
+          <div className="flex flex-wrap items-center gap-1">
+            <button onClick={selectAllVisible} className="btn-quiet">เลือกทั้งหมดที่แสดง</button>
+            <button onClick={deselectAllVisible} className="btn-quiet">ไม่เลือกที่แสดง</button>
+            <button onClick={selectOnlyValid} className="btn-quiet">เลือกเฉพาะที่ข้อมูลครบ</button>
             <input
-              type="text"
+              type="search"
               value={search}
               onChange={e => setSearch(e.target.value)}
-              placeholder="ค้นหา Key, Summary, BU..."
-              className="rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 px-3 py-1.5 text-xs text-slate-700 dark:text-slate-200 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-900/50 transition-colors w-56"
+              placeholder="ค้นหา key, summary, BU"
+              aria-label="ค้นหา"
+              className="field ml-2 w-56"
             />
-          </div>
-
-          <div className="flex items-center gap-2 flex-wrap pt-3 border-t border-slate-100 dark:border-slate-700">
-            <span className="text-xs text-slate-400 mr-1">เลือกด่วน:</span>
-            <button onClick={selectAllVisible} className="text-xs font-medium text-blue-600 dark:text-blue-400 hover:underline">เลือกทั้งหมดที่แสดง</button>
-            <span className="text-slate-300 dark:text-slate-600">·</span>
-            <button onClick={deselectAllVisible} className="text-xs font-medium text-slate-500 dark:text-slate-400 hover:underline">ไม่เลือกที่แสดง</button>
-            <span className="text-slate-300 dark:text-slate-600">·</span>
-            <button onClick={selectOnlyValid} className="text-xs font-medium text-green-600 dark:text-green-400 hover:underline">เลือกเฉพาะที่ผ่าน validation</button>
-            <span className="ml-auto text-xs text-slate-400 italic">💡 คลิกที่เซลล์ใดก็ได้เพื่อแก้ไข</span>
           </div>
         </div>
 
-        <div className="rounded-2xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 overflow-hidden">
+        <div className="panel overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-sm table-fixed">
               <colgroup>
                 <col className="w-10" />
                 <col className="w-24" />
-                <col className="w-52" />
+                <col className="w-44" />
                 <col className="w-32" />
                 <col className="w-32" />
-                <col className="w-36" />
-                <col className="w-44" />
-                <col className="w-44" />
+                <col className="w-32" />
+                <col className="w-40" />
+                <col className="w-40" />
                 <col className="w-28" />
               </colgroup>
               <thead>
-                <tr className="border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/50">
+                <tr className="border-b border-line bg-sunken">
                   <th className="py-2.5 px-3"></th>
-                  <th className="text-left py-2.5 px-3 text-xs font-medium text-slate-500 dark:text-slate-400">Key</th>
-                  <th className="text-left py-2.5 px-3 text-xs font-medium text-slate-500 dark:text-slate-400">Summary</th>
-                  <th className="text-left py-2.5 px-3 text-xs font-medium text-slate-500 dark:text-slate-400">BU</th>
-                  <th className="text-left py-2.5 px-3 text-xs font-medium text-slate-500 dark:text-slate-400">Status</th>
-                  <th className="text-left py-2.5 px-3 text-xs font-medium text-slate-500 dark:text-slate-400">Category</th>
-                  <th className="text-left py-2.5 px-3 text-xs font-medium text-slate-500 dark:text-slate-400">Root Cause</th>
-                  <th className="text-left py-2.5 px-3 text-xs font-medium text-slate-500 dark:text-slate-400">Resolution</th>
-                  <th className="text-left py-2.5 px-3 text-xs font-medium text-slate-500 dark:text-slate-400">ปัญหา</th>
+                  <th className="text-left py-2.5 px-3 text-xs font-medium text-muted">Key</th>
+                  <th className="text-left py-2.5 px-3 text-xs font-medium text-muted">Summary</th>
+                  <th className="text-left py-2.5 px-3 text-xs font-medium text-muted">BU</th>
+                  <th className="text-left py-2.5 px-3 text-xs font-medium text-muted">Status</th>
+                  <th className="text-left py-2.5 px-3 text-xs font-medium text-muted">Category</th>
+                  <th className="text-left py-2.5 px-3 text-xs font-medium text-muted">Root Cause</th>
+                  <th className="text-left py-2.5 px-3 text-xs font-medium text-muted">Resolution</th>
+                  <th className="text-left py-2.5 px-3 text-xs font-medium text-muted">ปัญหา</th>
                 </tr>
               </thead>
               <tbody>
                 {filteredTickets.map(t => (
                   <Fragment key={t.key}>
                   <tr
-                    className={`border-b border-slate-100 dark:border-slate-700/50 transition-colors align-top ${
-                      !t.valid ? 'bg-orange-50/40 dark:bg-orange-950/10' : ''
+                    className={`border-b border-line transition-colors align-top ${
+                      !t.valid ? 'bg-sunken' : ''
                     }`}
                   >
                     <td className="py-2 px-3">
@@ -487,38 +466,38 @@ function ValidateScreenInner() {
                         type="checkbox"
                         checked={selected.has(t.key)}
                         onChange={() => toggleOne(t.key)}
-                        className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                        className="h-4 w-4 rounded border-line-strong text-accent focus:ring-accent"
                       />
                     </td>
-                    <td className="py-2 px-3 font-medium text-blue-600 dark:text-blue-400 whitespace-nowrap">
+                    <td className="py-2 px-3 font-medium text-accent whitespace-nowrap">
                       {t.key}
                       {pendingCarry(t).length > 0 && (
                         <>
                           <button
                             onClick={() => setCarryOpen(o => (o === t.key ? null : t.key))}
                             title="มีค่าจาก report ก่อนหน้า"
-                            className="ml-1 rounded-full bg-indigo-100 dark:bg-indigo-900/40 px-1.5 text-[10px] font-semibold text-indigo-700 dark:text-indigo-300 hover:bg-indigo-200"
+                            className="ml-1 rounded-full bg-accent-soft px-1.5 text-[10px] font-semibold text-accent hover:bg-accent-soft"
                           >
                             ↺ {pendingCarry(t).length}
                           </button>
                         </>
                       )}
                     </td>
-                    <td className="py-2 px-3 text-slate-700 dark:text-slate-200">
+                    <td className="py-2 px-3 text-ink">
                       <EditableText value={t.summary ?? ''} onSave={v => editField(t.key, 'summary', v)} placeholder="ไม่มี summary" />
                     </td>
-                    <td className="py-2 px-3 text-slate-600 dark:text-slate-300">
-                      <EditableText value={t.businessUnit} onSave={v => editField(t.key, 'businessUnit', v)} placeholder="ไม่มี BU" />
+                    <td className="py-2 px-3 text-muted">
+                      <EditableText value={t.businessUnit} onSave={v => editField(t.key, 'businessUnit', v)} placeholder="ไม่มี BU" required />
                     </td>
-                    <td className="py-2 px-3 text-slate-600 dark:text-slate-300">
+                    <td className="py-2 px-3 text-muted">
                       <EditableSelect value={t.status} options={statusOptions} onSave={v => editField(t.key, 'status', v)} />
                     </td>
-                    <td className="py-2 px-3 text-slate-600 dark:text-slate-300">
+                    <td className="py-2 px-3 text-muted">
                       <EditableSelect value={t.typeOfIssue} options={typeOfIssueOptions} onSave={v => editField(t.key, 'typeOfIssue', v)} />
                       {!t.typeOfIssue && t.suggestedCategory && (
                         <button
                           onClick={() => editField(t.key, 'typeOfIssue', t.suggestedCategory!)}
-                          className="mt-1 flex items-center gap-1 text-[10px] font-medium text-purple-600 dark:text-purple-400 hover:underline"
+                          className="mt-1 flex items-center gap-1 text-[10px] font-medium text-accent hover:underline"
                         >
                           <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" />
@@ -527,23 +506,23 @@ function ValidateScreenInner() {
                         </button>
                       )}
                     </td>
-                    <td className="py-2 px-3 text-slate-600 dark:text-slate-300">
-                      <EditableText value={t.rootCause ?? ''} onSave={v => editField(t.key, 'rootCause', v)} placeholder="ไม่มีข้อมูล" multiline />
+                    <td className="py-2 px-3 text-muted">
+                      <EditableText value={t.rootCause ?? ''} onSave={v => editField(t.key, 'rootCause', v)} placeholder="ยังไม่กรอก" multiline />
                     </td>
-                    <td className="py-2 px-3 text-slate-600 dark:text-slate-300">
-                      <EditableText value={t.resolution ?? ''} onSave={v => editField(t.key, 'resolution', v)} placeholder="ไม่มีข้อมูล" multiline />
+                    <td className="py-2 px-3 text-muted">
+                      <EditableText value={t.resolution ?? ''} onSave={v => editField(t.key, 'resolution', v)} placeholder="ยังไม่กรอก" multiline />
                     </td>
                     <td className="py-2 px-3">
                       {t.problems.length > 0 ? (
-                        <div className="flex flex-wrap gap-1">
+                        <div className="flex flex-col gap-0.5">
                           {t.problems.map((p, i) => (
-                            <span key={i} className="rounded-full bg-red-50 dark:bg-red-900/30 px-2 py-0.5 text-[10px] font-medium text-red-600 dark:text-red-400 whitespace-nowrap">
+                            <span key={i} className="whitespace-nowrap text-[12px] text-attention">
                               {p}
                             </span>
                           ))}
                         </div>
                       ) : (
-                        <span className="inline-flex items-center gap-1 text-[11px] text-green-600 dark:text-green-400">
+                        <span className="inline-flex items-center gap-1 text-[11px] text-ok">
                           <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4.5 12.75l6 6 9-13.5"/></svg>
                           ครบถ้วน
                         </span>
@@ -551,22 +530,22 @@ function ValidateScreenInner() {
                     </td>
                   </tr>
                   {carryOpen === t.key && pendingCarry(t).length > 0 && (
-                    <tr className="bg-indigo-50/60 dark:bg-indigo-950/20 border-b border-indigo-100 dark:border-indigo-900/40">
+                    <tr className="bg-accent-soft border-b border-line">
                       <td></td>
                       <td colSpan={8} className="py-3 px-3">
-                        <p className="text-xs font-semibold text-slate-700 dark:text-slate-200 mb-2">ค่าจาก report ก่อนหน้าของ {t.key}</p>
+                        <p className="text-xs font-semibold text-ink mb-2">ค่าจาก report ก่อนหน้าของ {t.key}</p>
                         <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
                           {pendingCarry(t).map(f => (
-                            <div key={f} className="rounded-lg border border-indigo-200 dark:border-indigo-900/50 bg-white dark:bg-slate-800 p-2.5 text-xs">
+                            <div key={f} className="rounded-lg border border-line bg-surface p-2.5 text-xs">
                               <div className="flex items-start justify-between gap-2">
                                 <div className="min-w-0">
-                                  <p className="font-medium text-slate-500 dark:text-slate-400">{CARRY_LABEL[f]}</p>
-                                  <p className="text-slate-700 dark:text-slate-200 break-words line-clamp-3">{t.carryOver![f]!.value}</p>
-                                  <p className="text-[10px] text-slate-400 mt-0.5">จาก &quot;{t.carryOver![f]!.reportName}&quot;</p>
+                                  <p className="font-medium text-muted">{CARRY_LABEL[f]}</p>
+                                  <p className="text-ink break-words line-clamp-3">{t.carryOver![f]!.value}</p>
+                                  <p className="text-[10px] text-faint mt-0.5">จาก &quot;{t.carryOver![f]!.reportName}&quot;</p>
                                 </div>
                                 <button
                                   onClick={() => applyCarry(t.key, [f])}
-                                  className="shrink-0 rounded-md border border-indigo-300 dark:border-indigo-700 px-2 py-0.5 text-[11px] text-indigo-700 dark:text-indigo-300 hover:bg-indigo-50 dark:hover:bg-indigo-900/30"
+                                  className="shrink-0 rounded-md border border-line-strong px-2 py-0.5 text-[11px] text-accent hover:bg-indigo-50"
                                 >
                                   ใช้ค่านี้
                                 </button>
@@ -575,8 +554,8 @@ function ValidateScreenInner() {
                           ))}
                         </div>
                         <div className="mt-2 flex gap-4">
-                          <button onClick={() => { applyCarry(t.key); setCarryOpen(null) }} className="text-[11px] font-medium text-indigo-600 dark:text-indigo-400 hover:underline">ใช้ทั้งหมดของใบนี้</button>
-                          <button onClick={() => setCarryOpen(null)} className="text-[11px] text-slate-500 hover:underline">ปิด</button>
+                          <button onClick={() => { applyCarry(t.key); setCarryOpen(null) }} className="text-[11px] font-medium text-accent hover:underline">ใช้ทั้งหมดของใบนี้</button>
+                          <button onClick={() => setCarryOpen(null)} className="text-[11px] text-muted hover:underline">ปิด</button>
                         </div>
                       </td>
                     </tr>
@@ -584,7 +563,7 @@ function ValidateScreenInner() {
                   </Fragment>
                 ))}
                 {!filteredTickets.length && (
-                  <tr><td colSpan={9} className="py-10 text-center text-sm text-slate-400">ไม่พบข้อมูลที่ตรงกับตัวกรอง</td></tr>
+                  <tr><td colSpan={9} className="py-10 text-center text-sm text-faint">ไม่พบข้อมูลที่ตรงกับตัวกรอง</td></tr>
                 )}
               </tbody>
             </table>
@@ -592,34 +571,21 @@ function ValidateScreenInner() {
         </div>
 
         {saveState.state === 'error' && (
-          <div className="rounded-xl border border-red-200 dark:border-red-900/50 bg-red-50 dark:bg-red-950/20 px-5 py-3">
-            <p className="text-sm text-red-700 dark:text-red-400">{saveState.message}</p>
+          <div className="rounded-lg border border-line bg-sunken px-5 py-3">
+            <p className="text-sm text-danger">{saveState.message}</p>
           </div>
         )}
 
-        <div className="sticky bottom-4 flex items-center justify-between gap-4 rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-4 shadow-lg">
-          <p className="text-sm text-slate-600 dark:text-slate-300">
-            จะสร้าง Dashboard จาก <strong className="text-blue-600 dark:text-blue-400">{selected.size}</strong> จากทั้งหมด {tickets.length} tickets
+        <div className="sticky bottom-4 flex flex-wrap items-center justify-between gap-4 rounded-lg border border-line-strong bg-surface px-4 py-3 shadow-lg">
+          <p className="text-[14px] text-muted">
+            จะบันทึก <strong className="num text-ink">{selected.size}</strong> จาก <span className="num">{tickets.length}</span> tickets เป็น report ใหม่
           </p>
           <button
             onClick={handleConfirm}
             disabled={saveState.state === 'saving' || selected.size === 0}
-            className="flex items-center gap-2 rounded-xl bg-blue-600 px-6 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            className="btn-primary px-4 py-2 text-[14px]"
           >
-            {saveState.state === 'saving' ? (
-              <>
-                <svg className="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                </svg>
-                กำลังบันทึก...
-              </>
-            ) : (
-              <>
-                ยืนยันและสร้าง Dashboard
-                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3"/></svg>
-              </>
-            )}
+            {saveState.state === 'saving' ? 'กำลังบันทึก...' : 'บันทึกเป็น report'}
           </button>
         </div>
 
@@ -631,8 +597,8 @@ function ValidateScreenInner() {
 export default function ValidateScreen() {
   return (
     <Suspense fallback={
-      <div className="min-h-screen bg-slate-50 dark:bg-slate-900 flex items-center justify-center">
-        <svg className="h-8 w-8 animate-spin text-blue-500" fill="none" viewBox="0 0 24 24">
+      <div className="min-h-screen bg-paper flex items-center justify-center">
+        <svg className="h-8 w-8 animate-spin text-accent" fill="none" viewBox="0 0 24 24">
           <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
           <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
         </svg>

@@ -1,10 +1,15 @@
 import type { Metadata } from 'next'
-import { Inter } from 'next/font/google'
+// Self-hosted IBM Plex (no Google Fonts call at build time). Plex Sans Thai covers Thai + Latin;
+// Plex Mono is used only for ticket keys.
+import '@fontsource/ibm-plex-sans-thai/400.css'
+import '@fontsource/ibm-plex-sans-thai/500.css'
+import '@fontsource/ibm-plex-sans-thai/600.css'
+import '@fontsource/ibm-plex-sans-thai/700.css'
+import '@fontsource/ibm-plex-mono/400.css'
+import '@fontsource/ibm-plex-mono/500.css'
 import './globals.css'
 import { ThemeProvider } from '@/components/theme/ThemeProvider'
 import { AuthProvider } from '@/components/auth/AuthContext'
-
-const inter = Inter({ subsets: ['latin'] })
 
 export const metadata: Metadata = {
   title: 'CTS Report Dashboard',
@@ -13,8 +18,12 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="th" suppressHydrationWarning>
-      <body className={`${inter.className} bg-slate-50 dark:bg-slate-900 transition-colors`}>
+    <html
+      lang="th"
+      suppressHydrationWarning
+      style={{ ['--font-sans' as string]: "'IBM Plex Sans Thai'", ['--font-mono' as string]: "'IBM Plex Mono'" }}
+    >
+      <body className="font-sans bg-paper text-ink">
         <ThemeProvider>
           <AuthProvider>{children}</AuthProvider>
         </ThemeProvider>

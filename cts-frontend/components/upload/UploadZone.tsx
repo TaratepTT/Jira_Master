@@ -66,13 +66,13 @@ export default function UploadZone({ onStatusChange, status }: Props) {
       aria-label="อัปโหลดไฟล์ CSV หรือ Excel"
       className={[
         'relative flex flex-col items-center justify-center gap-4',
-        'rounded-2xl border-2 border-dashed px-8 py-16 text-center',
+        'rounded-lg border-2 border-dashed px-8 py-16 text-center',
         'transition-colors duration-150 outline-none',
         'focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2',
         isActive ? 'cursor-pointer' : 'cursor-default',
         isDragging
-          ? 'border-blue-500 bg-blue-50'
-          : 'border-slate-300 bg-white hover:border-blue-400 hover:bg-slate-50',
+          ? 'border-accent bg-accent-soft'
+          : 'border-line-strong bg-surface hover:border-accent hover:bg-sunken',
       ].join(' ')}
     >
       <input
@@ -87,13 +87,13 @@ export default function UploadZone({ onStatusChange, status }: Props) {
       {/* Icon */}
       <div
         className={[
-          'flex h-16 w-16 items-center justify-center rounded-2xl',
-          isDragging ? 'bg-blue-100' : 'bg-slate-100',
+          'flex h-16 w-16 items-center justify-center rounded-lg',
+          isDragging ? 'bg-accent-soft' : 'bg-sunken',
           'transition-colors duration-150',
         ].join(' ')}
       >
         <svg
-          className={['h-8 w-8', isDragging ? 'text-blue-600' : 'text-slate-400'].join(' ')}
+          className={['h-8 w-8', isDragging ? 'text-accent' : 'text-faint'].join(' ')}
           fill="none"
           stroke="currentColor"
           viewBox="0 0 24 24"
@@ -110,19 +110,19 @@ export default function UploadZone({ onStatusChange, status }: Props) {
 
       {/* Copy */}
       <div className="space-y-1">
-        <p className="text-base font-medium text-slate-700">
+        <p className="text-base font-medium text-ink">
           {isDragging ? 'วางไฟล์ที่นี่' : 'ลากไฟล์มาวาง หรือคลิกเพื่อเลือก'}
         </p>
-        <p className="text-sm text-slate-400">.csv · .xlsx · .xls · ไม่เกิน 20 MB</p>
+        <p className="text-sm text-faint">ไฟล์ .csv, .xlsx หรือ .xls ขนาดไม่เกิน 20 MB</p>
       </div>
 
       {/* Columns hint */}
-      <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-2.5 text-left">
-        <p className="mb-1 text-xs font-medium text-slate-500">คอลัมน์ที่ต้องมีในไฟล์</p>
-        <p className="font-mono text-xs text-slate-600 leading-5">
-          Issue Key · System · Status · Business Unit
+      <div className="rounded-lg border border-line bg-sunken px-4 py-2.5 text-left">
+        <p className="mb-1 text-xs font-medium text-muted">คอลัมน์ที่ต้องมีในไฟล์</p>
+        <p className="font-mono text-xs text-muted leading-5">
+          Issue Key, System, Status, Business Unit,
           <br />
-          Type of Issue · Recurring Issue Category
+          Type of Issue, Recurring Issue Category
         </p>
       </div>
     </div>

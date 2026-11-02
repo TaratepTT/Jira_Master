@@ -5,23 +5,22 @@ import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import api, { refreshReportFromJira, type BulkUpdateResponse } from '@/lib/api'
 import { useUrlFilters } from '@/lib/useUrlFilters'
-import ThemeToggle from '@/components/theme/ThemeToggle'
+import { AppNav, PageHeader } from '@/components/layout/AppShell'
 import ExpandableKeys from '@/components/dashboard/ExpandableKeys'
-import LogoutButton from '@/components/auth/LogoutButton'
 import { useAuth } from '@/components/auth/AuthContext'
 import RootCauseInsights from '@/components/dashboard/RootCauseInsights'
 import BulkEditModal from '@/components/dashboard/BulkEditModal'
 import TrendChart from '@/components/dashboard/TrendChart'
 import AgingPanel from '@/components/dashboard/AgingPanel'
 import FlowPanel from '@/components/dashboard/FlowPanel'
-import ProgressBar from '@/components/dashboard/ProgressBar'
+import BreakdownList from '@/components/dashboard/BreakdownList'
 import MultiSelectFilter from '@/components/dashboard/MultiSelectFilter'
 import SortableHeader from '@/components/dashboard/SortableHeader'
 import FilteredInsights from '@/components/dashboard/FilteredInsights'
 import TicketDetailModal, { type TicketNav } from '@/components/dashboard/TicketDetailModal'
 import type { ReportData, SortDir, SortKey, TicketDetail } from '@/components/dashboard/types'
 import {
-  TYPE_OF_ISSUE_OPTIONS, formatDate, isIncomplete, jiraBrowseUrl, pct, statusBadge,
+  TYPE_OF_ISSUE_OPTIONS, formatDate, isClosedStatus, isIncomplete, jiraBrowseUrl, openTicketAges, pct, statusBadge,
 } from '@/components/dashboard/utils'
 
 // The dashboard of one report. Sub-components live in components/dashboard/*:
@@ -61,7 +60,6 @@ function sortTickets(list: TicketDetail[], sortKey: SortKey | null, sortDir: Sor
   return sorted
 }
 
-// ── Main dashboard ─────────────────────────────────────────────
 // ── Main dashboard ─────────────────────────────────────────────
 export default function DashboardPage() {
   const { id } = useParams<{ id: string }>()
@@ -323,562 +321,413 @@ export default function DashboardPage() {
   }
 
   if (error) return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-900 flex items-center justify-center">
+    <div className="min-h-screen bg-paper flex items-center justify-center px-4">
       <div className="text-center space-y-3">
-        <p className="text-red-500 font-medium">{error}</p>
-        <Link href="/" className="text-sm text-blue-600 dark:text-blue-400 hover:underline">กลับหน้าหลัก</Link>
+        <p className="font-medium text-danger">{error}</p>
+        <Link href="/" className="link text-sm">กลับไปหน้ารายการ report</Link>
       </div>
     </div>
   )
 
   if (!data) return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-900 flex items-center justify-center">
-      <div className="space-y-3 w-full max-w-2xl px-6">
-        {[1,2,3,4].map(i => <div key={i} className="h-20 rounded-xl bg-slate-200 dark:bg-slate-800 animate-pulse" />)}
+    <div className="min-h-screen bg-paper">
+      <AppNav />
+      <div className="mx-auto max-w-[1200px] px-4 sm:px-8 py-10 space-y-4">
+        <div className="h-9 w-2/3 rounded bg-sunken animate-pulse" />
+        <div className="h-20 rounded bg-sunken animate-pulse" />
+        <div className="h-64 rounded bg-sunken animate-pulse" />
       </div>
     </div>
   )
 
   const { aggregations: ag, totalTickets, name, createdAt } = data
   const asOf = new Date(data.refreshedAt ?? createdAt)
-  const closedN = ag.statusCount['Closed'] ?? 0
+  const closedN = data.tickets.filter(t => isClosedStatus(t.status)).length
+  const openN = totalTickets - closedN
   const l3N = ag.l3Tickets.length
-  const systemEntries = Object.entries(ag.systemCount).sort((a,b) => b[1]-a[1])
-  const statusEntries = Object.entries(ag.statusCount).sort((a,b) => b[1]-a[1])
-  const buEntries = Object.entries(ag.buCount).sort((a,b) => b[1]-a[1])
-  const catEntries = Object.entries(ag.issueTypeCount).sort((a,b) => b[1]-a[1])
+  const ages = openTicketAges(data.tickets, asOf)
+  const over14 = ages.filter(a => a.days > 14).length
+  const oldest = ages[0]
+  const toggleIn = (list: string[], v: string) => (list.includes(v) ? list.filter(x => x !== v) : [...list, v])
+  const pickAndShow = (patch: Parameters<typeof setFilters>[0]) => {
+    setFilters(patch)
+    document.getElementById('issue-table')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
+  const thaiDate = (d: string | Date) => new Date(d).toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: 'numeric' })
+  const thaiDateTime = (d: string | Date) => new Date(d).toLocaleString('th-TH', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
+
+  const ledger: Array<{ label: string; value: string; tone?: 'attention' | 'danger'; onClick?: () => void; hint?: string }> = [
+    { label: 'Tickets ใน report', value: totalTickets.toLocaleString() },
+    { label: 'ปิดแล้ว', value: `${pct(closedN, totalTickets)}%`, hint: `${closedN} ใบ` },
+    { label: 'ยังเปิดอยู่', value: openN.toLocaleString() },
+    { label: 'ค้างเกิน 14 วัน', value: over14.toLocaleString(), tone: over14 ? 'attention' : undefined },
+    { label: 'อยู่ที่ L3', value: l3N.toLocaleString(), tone: l3N ? 'danger' : undefined },
+    {
+      label: 'ข้อมูลยังไม่ครบ', value: incompleteCount.toLocaleString(), tone: incompleteCount ? 'attention' : undefined,
+      onClick: incompleteCount ? () => pickAndShow({ incomplete: true }) : undefined, hint: incompleteCount ? 'ดูในตาราง' : undefined,
+    },
+  ]
+  const toneText = { attention: 'text-attention', danger: 'text-danger' } as const
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-900 transition-colors">
-      {/* Header */}
-      <header className="bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 sticky top-0 z-10 transition-colors">
-        <div className="mx-auto max-w-6xl px-4 sm:px-6 min-h-14 py-2 flex items-center justify-between gap-3 flex-wrap">
-          <div className="flex items-center gap-3">
-            <Link href="/" className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors">
-              <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18"/></svg>
-            </Link>
-            <div>
-              <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">{name}</p>
-              <p className="text-xs text-slate-400">
-                {totalTickets} tickets · {new Date(createdAt).toLocaleDateString('th-TH', { day:'numeric', month:'short', year:'numeric' })}
-                {data.refreshedAt && <> · รีเฟรชจาก Jira {new Date(data.refreshedAt).toLocaleString('th-TH', { day:'numeric', month:'short', hour:'2-digit', minute:'2-digit' })}</>}
-              </p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2 flex-wrap">
-            <ThemeToggle />
-            <LogoutButton />
-            {canEdit && (
-              <button
-                onClick={handleRefresh}
-                disabled={refreshing}
-                title="ดึงสถานะ / ผู้รับผิดชอบ / วันที่ resolve ล่าสุดจาก Jira มาใส่ report นี้"
-                className="flex items-center gap-1.5 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-1.5 text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 disabled:opacity-50 transition-colors"
-              >
-                <svg className={`h-3.5 w-3.5 ${refreshing ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" />
-                </svg>
-                {refreshing ? 'กำลังรีเฟรช...' : 'รีเฟรชจาก Jira'}
-              </button>
-            )}
-            <Link
-              href={`/dashboard/${id}/summary`}
-              className="flex items-center gap-1.5 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-1.5 text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors"
-            >
-              <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6.72 13.829c-.24.03-.48.062-.72.096m.72-.096a42.415 42.415 0 0110.56 0m-10.56 0L6.34 18m10.94-4.171c.24.03.48.062.72.096m-.72-.096L17.66 18m0 0l.229 2.523a1.125 1.125 0 01-1.12 1.227H7.231c-.662 0-1.18-.568-1.12-1.227L6.34 18m11.318 0h1.091A2.25 2.25 0 0021 15.75V9.456c0-1.081-.768-2.015-1.837-2.175a48.055 48.055 0 00-1.913-.247M6.34 18H5.25A2.25 2.25 0 013 15.75V9.456c0-1.081.768-2.015 1.837-2.175a48.041 48.041 0 011.913-.247m10.5 0a48.536 48.536 0 00-10.5 0m10.5 0V3.375c0-.621-.504-1.125-1.125-1.125h-8.25c-.621 0-1.125.504-1.125 1.125v3.659M18 10.5h.008v.008H18V10.5zm-3 0h.008v.008H15V10.5z" />
-              </svg>
-              สรุปสำหรับประชุม
-            </Link>
-            <Link
-              href={`/compare?current=${id}`}
-              className="flex items-center gap-1.5 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-1.5 text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors"
-            >
-              <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7.5 21L3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5" />
-              </svg>
-              เทียบกับ report ก่อนหน้า
-            </Link>
-            <button
-              onClick={handleExportCsv}
-              disabled={exportingCsv}
-              className="flex items-center gap-1.5 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-1.5 text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 disabled:opacity-50 transition-colors"
-            >
-              {exportingCsv ? (
-                <svg className="h-3.5 w-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                </svg>
-              ) : (
-                <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3"/></svg>
-              )}
-              {exportingCsv ? 'กำลัง Export...' : 'Export CSV'}
-            </button>
-          </div>
-        </div>
-      </header>
+    <div className="min-h-screen bg-paper text-ink">
+      <AppNav />
 
-      <main className="mx-auto max-w-6xl px-4 sm:px-6 py-8 space-y-8">
+      <main className="mx-auto max-w-[1200px] px-4 py-8 sm:px-8 space-y-10">
+        <PageHeader
+          back={{ href: '/', label: 'Reports' }}
+          title={name}
+          description={<>sync เมื่อ {thaiDate(createdAt)}{data.refreshedAt && <>, รีเฟรชจาก Jira ล่าสุด {thaiDateTime(data.refreshedAt)}</>}</>}
+          actions={
+            <>
+              <button onClick={handleExportCsv} disabled={exportingCsv} className="btn">
+                {exportingCsv ? 'กำลัง export...' : 'Export CSV'}
+              </button>
+              <Link href={`/compare?current=${id}`} className="btn">เทียบกับ report ก่อนหน้า</Link>
+              <Link href={`/dashboard/${id}/summary`} className="btn">สรุปสำหรับประชุม</Link>
+              {canEdit && (
+                <button
+                  onClick={handleRefresh}
+                  disabled={refreshing}
+                  title="ดึงสถานะ ผู้รับผิดชอบ และวันที่ resolve ล่าสุดจาก Jira มาใส่ report นี้"
+                  className="btn-primary"
+                >
+                  <svg className={`h-3.5 w-3.5 ${refreshing ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" />
+                  </svg>
+                  {refreshing ? 'กำลังรีเฟรช...' : 'รีเฟรชจาก Jira'}
+                </button>
+              )}
+            </>
+          }
+        />
 
         {refreshMsg && (
-          <div className={`rounded-xl border px-4 py-3 ${refreshMsg.ok
-            ? 'border-green-200 dark:border-green-900/50 bg-green-50 dark:bg-green-950/20'
-            : 'border-red-200 dark:border-red-900/50 bg-red-50 dark:bg-red-950/20'}`}>
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <p className={`text-sm font-medium ${refreshMsg.ok ? 'text-green-800 dark:text-green-300' : 'text-red-700 dark:text-red-400'}`}>{refreshMsg.text}</p>
-                {refreshMsg.details?.map((d, i) => <p key={i} className="text-xs text-slate-600 dark:text-slate-400 mt-0.5">{d}</p>)}
-              </div>
-              <button onClick={() => setRefreshMsg(null)} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200" aria-label="ปิด">
-                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
-              </button>
+          <div role="status" className={`flex items-start justify-between gap-3 rounded-lg border px-4 py-3 ${refreshMsg.ok ? 'border-line bg-ok-soft' : 'border-line bg-danger-soft'}`}>
+            <div className="text-[13px]">
+              <p className={`font-medium ${refreshMsg.ok ? 'text-ok' : 'text-danger'}`}>{refreshMsg.text}</p>
+              {refreshMsg.details?.map((d, i) => <p key={i} className="mt-0.5 text-muted">{d}</p>)}
             </div>
+            <button onClick={() => setRefreshMsg(null)} className="btn-quiet" aria-label="ปิดข้อความ">ปิด</button>
           </div>
         )}
 
-        {incompleteCount > 0 && (
-          <div className="rounded-xl border border-amber-200 dark:border-amber-900/50 bg-amber-50 dark:bg-amber-950/20 px-5 py-3 flex items-center justify-between gap-3 flex-wrap">
-            <p className="text-sm text-amber-900 dark:text-amber-200">
-              <strong>{incompleteCount} tickets</strong> ยังกรอกข้อมูลไม่ครบ (BU / Type of Issue / Root Cause / Resolution)
-            </p>
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => setFilters({ incomplete: !incompleteOnly })}
-                className="rounded-lg border border-amber-300 dark:border-amber-800 px-3 py-1.5 text-xs font-medium text-amber-800 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-900/30 transition-colors"
-              >
-                {incompleteOnly ? 'แสดงทั้งหมด' : 'ดูเฉพาะที่ไม่ครบ'}
-              </button>
-              <button
-                onClick={startFillQueue}
-                className="rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-amber-700 transition-colors"
-              >
-                {canEdit ? 'เริ่มไล่กรอกทีละใบ →' : 'ไล่ดูทีละใบ →'}
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Executive Summary */}
-        <section className="rounded-2xl bg-gradient-to-br from-blue-700 to-blue-500 dark:from-blue-800 dark:to-blue-600 p-6 text-white">
-          <p className="text-xs font-semibold uppercase tracking-wider opacity-70 mb-2">Executive Summary</p>
-          <p className="text-lg font-medium leading-relaxed mb-5">
-            ช่วงนี้ทีม Tech Support จัดการ <strong>{totalTickets} tickets</strong> ทั้งหมด
-            ปิดได้ <strong>{pct(closedN, totalTickets)}%</strong> ({closedN} tickets)
-            {l3N > 0 && ` · ยังมี ${l3N} ticket ที่อยู่ระหว่างสอบสวน (L3)`}
+        {/* Headline: the week in one sentence */}
+        <section>
+          <p className="max-w-[40rem] text-balance text-[26px] font-semibold leading-[1.35] tracking-[-0.01em] sm:text-[32px]">
+            <span className="num">{totalTickets.toLocaleString()}</span> tickets ใน report นี้
+            ปิดแล้ว <span className="num">{closedN.toLocaleString()}</span> ยังเปิดอยู่ <span className="num">{openN.toLocaleString()}</span>
           </p>
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-            <div className="bg-white/15 rounded-xl p-3"><p className="text-2xl font-semibold">{totalTickets}</p><p className="text-xs opacity-75 mt-0.5">Total tickets</p></div>
-            <div className="bg-white/15 rounded-xl p-3"><p className="text-2xl font-semibold">{pct(closedN,totalTickets)}%</p><p className="text-xs opacity-75 mt-0.5">Closure rate</p></div>
-            <div className="bg-white/15 rounded-xl p-3"><p className="text-2xl font-semibold">{l3N}</p><p className="text-xs opacity-75 mt-0.5">L3 escalation</p></div>
-            <div className="bg-white/15 rounded-xl p-3"><p className="text-2xl font-semibold">{Object.keys(ag.systemCount).length}</p><p className="text-xs opacity-75 mt-0.5">Systems</p></div>
-            <div className="bg-white/15 rounded-xl p-3"><p className="text-2xl font-semibold">{ag.top5Bu[0]?.count ?? 0}</p><p className="text-xs opacity-75 mt-0.5">{ag.top5Bu[0]?.name ?? '-'}</p></div>
-            <div className="bg-white/15 rounded-xl p-3"><p className="text-2xl font-semibold">{ag.top3Cat[0]?.count ?? 0}</p><p className="text-xs opacity-75 mt-0.5">{ag.top3Cat[0]?.category ?? '-'}</p></div>
+          <p className="mt-2 max-w-[46rem] text-[15px] leading-relaxed text-muted">
+            {oldest
+              ? <>ใบที่ค้างนานที่สุดเปิดมาแล้ว <span className="num text-ink">{oldest.days}</span> วัน (<button onClick={() => openTicket(oldest.ticket.key)} className="link key">{oldest.ticket.key}</button>)</>
+              : 'ไม่มี ticket ที่เปิดค้าง'}
+            {l3N > 0 && <>, มี <span className="num text-danger">{l3N}</span> ใบอยู่ที่ L3</>}
+            {ag.top3Cat[0] && <>, ประเภทที่เจอบ่อยที่สุดคือ <span className="text-ink">{ag.top3Cat[0].category}</span> ({ag.top3Cat[0].count} ใบ)</>}
+          </p>
+
+          {/* KPI ledger */}
+          <dl className="mt-6 grid grid-cols-2 overflow-hidden rounded-lg border border-line bg-surface sm:grid-cols-3 lg:grid-cols-6">
+            {ledger.map((c, i) => {
+              const inner = (
+                <>
+                  <dt className="text-[12px] text-muted">{c.label}</dt>
+                  <dd className={`mt-1 text-[24px] font-semibold leading-none num ${c.tone ? toneText[c.tone] : 'text-ink'}`}>{c.value}</dd>
+                  {c.hint && <dd className={`mt-1.5 text-[12px] ${c.onClick ? 'text-accent' : 'text-faint'}`}>{c.hint}</dd>}
+                </>
+              )
+              const cls = `border-line px-4 py-3.5 text-left ${i % 2 ? 'border-l' : ''} ${i >= 2 ? 'border-t' : ''} sm:border-t-0 sm:border-l ${i % 3 === 0 ? 'sm:border-l-0' : ''} ${i >= 3 ? 'sm:border-t' : ''} lg:border-t-0 lg:border-l ${i === 0 ? 'lg:border-l-0' : ''}`
+              return c.onClick
+                ? <button key={c.label} onClick={c.onClick} className={`${cls} transition-colors hover:bg-sunken`}>{inner}</button>
+                : <div key={c.label} className={cls}>{inner}</div>
+            })}
+          </dl>
+        </section>
+
+        {/* Needs attention */}
+        {(incompleteCount > 0 || l3N > 0) && (
+          <section aria-labelledby="attention-title">
+            <h2 id="attention-title" className="section-title mb-3">ต้องติดตาม</h2>
+            <div className="panel divide-y divide-line">
+              {incompleteCount > 0 && (
+                <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
+                  <div className="flex items-start gap-3">
+                    <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-attention" aria-hidden />
+                    <div>
+                      <p className="text-[14px] font-medium">{incompleteCount} tickets ยังกรอกข้อมูลไม่ครบ</p>
+                      <p className="text-[13px] text-muted">ขาด BU, Type of Issue, Root Cause หรือ Resolution อย่างใดอย่างหนึ่ง</p>
+                    </div>
+                  </div>
+                  <div className="flex gap-2">
+                    <button onClick={() => pickAndShow({ incomplete: !incompleteOnly })} className="btn">
+                      {incompleteOnly ? 'แสดงทุก ticket' : 'ดูเฉพาะใบที่ไม่ครบ'}
+                    </button>
+                    <button onClick={startFillQueue} className="btn-primary">
+                      {canEdit ? 'กรอกทีละใบ' : 'ดูทีละใบ'}
+                    </button>
+                  </div>
+                </div>
+              )}
+              {ag.l3Tickets.map(t => (
+                <button
+                  key={t.key}
+                  onClick={() => openTicket(t.key)}
+                  className="flex w-full items-start gap-3 px-4 py-3 text-left transition-colors hover:bg-sunken"
+                >
+                  <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-danger" aria-hidden />
+                  <span className="min-w-0">
+                    <span className="text-[14px] font-medium"><span className="key text-accent">{t.key}</span> อยู่ที่ {t.status}</span>
+                    <span className="block truncate text-[13px] text-muted">{t.summary ?? t.bu}</span>
+                  </span>
+                </button>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {/* Breakdowns — click a row to filter the ticket table */}
+        <section aria-labelledby="breakdown-title">
+          <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
+            <h2 id="breakdown-title" className="section-title">แยกตามหมวด</h2>
+            <p className="section-note">คลิกรายการเพื่อกรองตาราง ticket ด้านล่าง</p>
+          </div>
+          <div className="panel panel-pad grid gap-x-10 gap-y-7 md:grid-cols-2 lg:grid-cols-3">
+            <BreakdownList title="Status" rows={statusOptions.map(o => [o.value, o.count])} total={totalTickets}
+              active={statusFilter} onPick={v => pickAndShow({ status: toggleIn(statusFilter, v) })} />
+            <BreakdownList title="Business Unit" rows={buOptions.map(o => [o.value, o.count])} total={totalTickets}
+              active={buFilter} onPick={v => pickAndShow({ bu: toggleIn(buFilter, v) })} />
+            <BreakdownList title="Type of Issue" rows={categoryOptions.map(o => [o.value, o.count])} total={totalTickets}
+              active={categoryFilter} onPick={v => pickAndShow({ category: toggleIn(categoryFilter, v) })} />
+            <BreakdownList title="ระบบ" rows={systemOptions.map(o => [o.value, o.count])} total={totalTickets}
+              active={systemFilter} onPick={v => pickAndShow({ system: toggleIn(systemFilter, v) })} />
+            <BreakdownList title="ผู้รับผิดชอบ" rows={ag.topAssignees.map(a => [a.name, a.count])} total={totalTickets} emptyText="ไม่มีข้อมูล assignee" />
+            <BreakdownList title="Priority" rows={Object.entries(ag.priorityCount).sort((a, b) => b[1] - a[1])} total={totalTickets} emptyText="ไม่มีข้อมูล priority" />
           </div>
         </section>
 
-        {/* L3 Alert */}
-        {l3N > 0 && (
-          <div className="rounded-xl border border-orange-200 dark:border-orange-900/50 bg-orange-50 dark:bg-orange-950/20 px-5 py-4">
-            <p className="text-sm font-semibold text-orange-800 dark:text-orange-400 mb-2">⚠ L3-INVESTIGATE — ต้องติดตาม</p>
-            {ag.l3Tickets.map(t => (
-              <p key={t.key} className="text-sm text-orange-700 dark:text-orange-300">{t.key}: {t.summary ?? t.bu}</p>
-            ))}
-          </div>
-        )}
+        {/* Time-based views */}
+        <section className="space-y-5" aria-label="แนวโน้มและอายุ ticket">
+          <TrendChart tickets={data.tickets} />
+          <AgingPanel tickets={data.tickets} asOf={asOf} onOpenTicket={key => openTicket(key)} />
+          <FlowPanel tickets={data.tickets} canRefresh={canEdit} onRefresh={handleRefresh} refreshing={refreshing} />
+        </section>
 
-        {/* Row 1: System + Status */}
-        <div className="grid gap-5 lg:grid-cols-2">
-          <div className="rounded-2xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 p-5">
-            <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-200 mb-4">Issue Type — ระบบ</h2>
-            {systemEntries.map(([s, c]) => <ProgressBar key={s} label={s} count={c} total={totalTickets} color="bg-blue-500" />)}
-            <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 mt-3 pt-3 border-t border-slate-100 dark:border-slate-700">รวมทั้งหมด: {totalTickets} tickets</p>
-          </div>
-          <div className="rounded-2xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 p-5">
-            <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-200 mb-4">Status Type</h2>
-            {statusEntries.map(([s, c]) => (
-              <div key={s} className="mb-3">
-                <div className="flex justify-between items-center text-xs text-slate-600 dark:text-slate-400 mb-1">
-                  <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${statusBadge(s)}`}>{s}</span>
-                  <span className="font-medium">{c} · {pct(c, totalTickets)}%</span>
-                </div>
-                <div className="h-2 rounded-full bg-slate-100 dark:bg-slate-700 overflow-hidden">
-                  <div className="h-full rounded-full bg-slate-400 transition-all" style={{ width: `${pct(c, totalTickets)}%` }} />
-                </div>
-              </div>
-            ))}
-            <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 mt-3 pt-3 border-t border-slate-100 dark:border-slate-700">รวมทั้งหมด: {totalTickets} tickets</p>
-          </div>
-        </div>
-
-        {/* Row 2: BU + Category */}
-        <div className="grid gap-5 lg:grid-cols-2">
-          <div className="rounded-2xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 p-5">
-            <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-200 mb-1">Business Unit</h2>
-            <p className="text-xs text-slate-400 mb-4">Top 5 BU</p>
-            <ol className="mb-4 space-y-1">
-              {ag.top5Bu.map((b, i) => <li key={b.name} className="text-sm text-slate-600 dark:text-slate-300">{i+1}. {b.name} <span className="text-slate-400">({b.count})</span></li>)}
-            </ol>
-            {buEntries.map(([b, c]) => <ProgressBar key={b} label={b} count={c} total={totalTickets} color="bg-purple-400" />)}
-            <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 mt-3 pt-3 border-t border-slate-100 dark:border-slate-700">รวมทั้งหมด: {totalTickets} tickets</p>
-          </div>
-          <div className="rounded-2xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 p-5">
-            <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-200 mb-1">Ticket Type Category</h2>
-            <p className="text-xs text-slate-400 mb-4">Top 3 category: {ag.top3Cat.map(c => c.category).join(', ')}</p>
-            {catEntries.map(([c, n]) => <ProgressBar key={c} label={c} count={n} total={totalTickets} color="bg-teal-500" />)}
-            <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 mt-3 pt-3 border-t border-slate-100 dark:border-slate-700">รวมทั้งหมด: {totalTickets} tickets</p>
-          </div>
-        </div>
-
-        {/* Row 3: Assignee + Priority */}
-        <div className="grid gap-5 lg:grid-cols-2">
-          <div className="rounded-2xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 p-5">
-            <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-200 mb-1">Assignee Breakdown</h2>
-            <p className="text-xs text-slate-400 mb-4">ใครรับผิดชอบ ticket มากที่สุด</p>
-            {ag.topAssignees.length === 0 ? (
-              <p className="text-sm text-slate-400 py-4 text-center">ไม่มีข้อมูล assignee</p>
-            ) : (
-              ag.topAssignees.map(a => (
-                <ProgressBar key={a.name} label={a.name} count={a.count} total={totalTickets} color="bg-indigo-400" />
-              ))
-            )}
-          </div>
-          <div className="rounded-2xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 p-5">
-            <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-200 mb-4">Priority Breakdown</h2>
-            {Object.keys(ag.priorityCount).length === 0 ? (
-              <p className="text-sm text-slate-400 py-4 text-center">ไม่มีข้อมูล priority</p>
-            ) : (
-              Object.entries(ag.priorityCount).sort((a, b) => b[1] - a[1]).map(([p, c]) => (
-                <ProgressBar key={p} label={p} count={c} total={totalTickets} color="bg-rose-400" />
-              ))
-            )}
-          </div>
-        </div>
-
-        {/* Trend Chart */}
-        <TrendChart tickets={data.tickets} />
-
-        {/* Aging + Created vs Resolved */}
-        <AgingPanel tickets={data.tickets} asOf={asOf} onOpenTicket={key => openTicket(key)} />
-        <FlowPanel tickets={data.tickets} canRefresh={canEdit} onRefresh={handleRefresh} refreshing={refreshing} />
-
-        {/* Frequency Table */}
-        <div className="rounded-2xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 p-5">
-          <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-200 mb-4">Ticket Frequency by Category</h2>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+        {/* Frequency by category */}
+        <section aria-labelledby="freq-title">
+          <h2 id="freq-title" className="section-title mb-3">ความถี่ตามหมวดปัญหา</h2>
+          <div className="panel overflow-x-auto">
+            <table className="w-full text-[13px]">
               <thead>
-                <tr className="border-b border-slate-200 dark:border-slate-700">
-                  <th className="text-left py-2 px-3 text-xs font-medium text-slate-500 dark:text-slate-400">ลำดับ</th>
-                  <th className="text-left py-2 px-3 text-xs font-medium text-slate-500 dark:text-slate-400">Category</th>
-                  <th className="text-right py-2 px-3 text-xs font-medium text-slate-500 dark:text-slate-400">จำนวน</th>
-                  <th className="text-right py-2 px-3 text-xs font-medium text-slate-500 dark:text-slate-400">%</th>
-                  <th className="text-left py-2 px-3 text-xs font-medium text-slate-500 dark:text-slate-400">Ticket Keys</th>
+                <tr className="border-b border-line text-left text-[12px] text-muted">
+                  <th className="px-4 py-2 font-medium w-12">#</th>
+                  <th className="px-4 py-2 font-medium">หมวด</th>
+                  <th className="px-4 py-2 font-medium text-right">จำนวน</th>
+                  <th className="px-4 py-2 font-medium text-right">สัดส่วน</th>
+                  <th className="px-4 py-2 font-medium">Tickets</th>
                 </tr>
               </thead>
               <tbody>
                 {ag.frequencyTable.map(row => (
-                  <tr key={row.rank} className="border-b border-slate-100 dark:border-slate-700/50 hover:bg-slate-50 dark:hover:bg-slate-700/30">
-                    <td className="py-2 px-3 text-slate-500 dark:text-slate-400">{row.rank}</td>
-                    <td className="py-2 px-3 font-medium text-slate-700 dark:text-slate-200">{row.category}</td>
-                    <td className="py-2 px-3 text-right dark:text-slate-300">{row.count}</td>
-                    <td className="py-2 px-3 text-right text-slate-500 dark:text-slate-400">{row.pct}</td>
-                    <td className="py-2 px-3">
-                      <ExpandableKeys keys={row.keys} />
-                    </td>
+                  <tr key={row.rank} className="border-b border-line last:border-b-0 align-top">
+                    <td className="px-4 py-2 text-faint num">{row.rank}</td>
+                    <td className="px-4 py-2 font-medium">{row.category || <span className="font-normal text-faint">ไม่ระบุ</span>}</td>
+                    <td className="px-4 py-2 text-right num">{row.count}</td>
+                    <td className="px-4 py-2 text-right text-muted num">{row.pct}</td>
+                    <td className="px-4 py-2"><ExpandableKeys keys={row.keys} /></td>
                   </tr>
                 ))}
-                <tr className="bg-slate-50 dark:bg-slate-700/50 font-semibold">
-                  <td className="py-2 px-3 dark:text-slate-200">-</td>
-                  <td className="py-2 px-3 dark:text-slate-200">Grand Total</td>
-                  <td className="py-2 px-3 text-right dark:text-slate-200">{totalTickets}</td>
-                  <td className="py-2 px-3 text-right dark:text-slate-200">100.00%</td>
-                  <td className="py-2 px-3 dark:text-slate-200">-</td>
-                </tr>
               </tbody>
+              <tfoot>
+                <tr className="border-t border-line-strong font-semibold">
+                  <td className="px-4 py-2" />
+                  <td className="px-4 py-2">รวม</td>
+                  <td className="px-4 py-2 text-right num">{totalTickets}</td>
+                  <td className="px-4 py-2 text-right num">100%</td>
+                  <td className="px-4 py-2" />
+                </tr>
+              </tfoot>
             </table>
           </div>
-        </div>
+        </section>
 
-        {/* AI Root Cause summary */}
         <RootCauseInsights reportId={id} />
 
-        {/* Highlighted Issues */}
-        <div className="rounded-2xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 p-5">
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-200">
-              รายการที่เลือกไว้ {highlighted.size > 0 && <span className="text-blue-600 dark:text-blue-400">({highlighted.size})</span>}
-            </h2>
-            {highlighted.size > 0 && (
-              <div className="flex items-center gap-3">
-                {canEdit && (
-                  <button
-                    onClick={() => setBulkOpen(true)}
-                    className="flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 transition-colors"
-                  >
-                    <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931z" />
-                    </svg>
-                    แก้ไขพร้อมกัน ({highlighted.size})
-                  </button>
-                )}
-                <button onClick={() => setHighlighted(new Set())} className="text-xs font-medium text-red-500 hover:underline">
-                  ล้างทั้งหมด
-                </button>
+        {/* Pinned tickets */}
+        {highlighted.size > 0 && (
+          <section aria-labelledby="pinned-title">
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+              <h2 id="pinned-title" className="section-title">ที่เลือกไว้ <span className="text-muted num">({highlighted.size})</span></h2>
+              <div className="flex gap-2">
+                {canEdit && <button onClick={() => setBulkOpen(true)} className="btn-primary">แก้ไขพร้อมกัน {highlighted.size} ใบ</button>}
+                <button onClick={() => setHighlighted(new Set())} className="btn">ล้างที่เลือก</button>
               </div>
-            )}
-          </div>
-
-          {highlighted.size === 0 ? (
-            <p className="text-sm text-slate-400 dark:text-slate-500 py-4 text-center">
-              ยังไม่ได้เลือกรายการ — ติ๊กเลือกจากตาราง Issue Detail ด้านล่าง (เช่น Non-app issue, Human Error) เพื่อนำมาไฮไลท์ตรงนี้
-            </p>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-slate-200 dark:border-slate-700">
-                    <th className="text-left py-2 px-3 text-xs font-medium text-slate-500 dark:text-slate-400">Key</th>
-                    <th className="text-left py-2 px-3 text-xs font-medium text-slate-500 dark:text-slate-400">Summary</th>
-                    <th className="text-left py-2 px-3 text-xs font-medium text-slate-500 dark:text-slate-400">Status</th>
-                    <th className="text-left py-2 px-3 text-xs font-medium text-slate-500 dark:text-slate-400">Category</th>
-                    <th className="w-10"></th>
-                  </tr>
-                </thead>
+            </div>
+            <div className="panel overflow-x-auto">
+              <table className="w-full text-[13px]">
                 <tbody>
                   {data.tickets.filter(t => highlighted.has(t.key)).map(t => (
-                    <tr
-                      key={t.key}
-                      onClick={() => openTicket(t.key)}
-                      className="border-b border-slate-100 dark:border-slate-700/50 hover:bg-blue-50 dark:hover:bg-blue-950/20 cursor-pointer"
-                    >
-                      <td className="py-2 px-3 font-medium whitespace-nowrap">
-                        <a
-                          href={jiraBrowseUrl(t.key)}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          onClick={(e) => e.stopPropagation()}
-                          className="text-blue-600 dark:text-blue-400 hover:underline inline-flex items-center gap-1"
-                        >
-                          {t.key}
-                          <svg className="h-3 w-3 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
-                          </svg>
-                        </a>
-                      </td>
-                      <td className="py-2 px-3 text-slate-700 dark:text-slate-200 whitespace-normal break-words min-w-[200px] max-w-[400px]">{t.summary || '—'}</td>
-                      <td className="py-2 px-3">
-                        <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium whitespace-nowrap ${statusBadge(t.status)}`}>{t.status}</span>
-                      </td>
-                      <td className="py-2 px-3 text-slate-600 dark:text-slate-300">{t.typeOfIssue || '—'}</td>
-                      <td className="py-2 px-3 text-center" onClick={(e) => e.stopPropagation()}>
-                        <button onClick={() => toggleHighlight(t.key)} className="text-slate-400 hover:text-red-500 transition-colors">
-                          <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                          </svg>
-                        </button>
+                    <tr key={t.key} onClick={() => openTicket(t.key)} className="cursor-pointer border-b border-line last:border-b-0 hover:bg-sunken">
+                      <td className="whitespace-nowrap px-4 py-2"><span className="key text-accent">{t.key}</span></td>
+                      <td className="min-w-[220px] px-4 py-2">{t.summary || '—'}</td>
+                      <td className="px-4 py-2"><span className={`chip ${statusBadge(t.status)}`}>{t.status}</span></td>
+                      <td className="px-4 py-2 text-muted">{t.typeOfIssue || '—'}</td>
+                      <td className="px-2 py-2 text-right" onClick={e => e.stopPropagation()}>
+                        <button onClick={() => toggleHighlight(t.key)} className="btn-quiet" aria-label={`เอา ${t.key} ออกจากที่เลือก`}>เอาออก</button>
                       </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
-          )}
-        </div>
+          </section>
+        )}
 
-        {/* Issue Detail — Root Cause & Resolution & Deploy — with filters & sort */}
-        <div className="rounded-2xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 p-5">
-          <div className="flex items-center justify-between mb-3 gap-3 flex-wrap">
-            <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-200">Issue Detail — Root Cause, Resolution & Deploy</h2>
-            <input
-              type="text"
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-              placeholder="ค้นหา Key, Summary, Root Cause..."
-              className="rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 px-3 py-1.5 text-xs text-slate-700 dark:text-slate-200 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-900/50 transition-colors w-64"
-            />
-          </div>
-
-          {/* Filter bar */}
-          <div className="flex items-center gap-2 flex-wrap mb-4 pb-4 border-b border-slate-100 dark:border-slate-700">
-            <span className="text-xs font-medium text-slate-400 mr-1">ตัวกรอง:</span>
-            <MultiSelectFilter label="Business Unit" options={buOptions} selected={buFilter} onChange={setBuFilter} />
-            <MultiSelectFilter label="Status" options={statusOptions} selected={statusFilter} onChange={setStatusFilter} />
-            <MultiSelectFilter label="System" options={systemOptions} selected={systemFilter} onChange={setSystemFilter} />
-            <MultiSelectFilter label="Category" options={categoryOptions} selected={categoryFilter} onChange={setCategoryFilter} />
-            <button
-              onClick={() => setFilters({ incomplete: !incompleteOnly })}
-              className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
-                incompleteOnly
-                  ? 'border-amber-300 bg-amber-50 text-amber-800 dark:border-amber-800 dark:bg-amber-900/30 dark:text-amber-300'
-                  : 'border-slate-300 bg-white text-slate-600 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700'
-              }`}
-            >
-              ข้อมูลยังไม่ครบ ({incompleteCount})
-            </button>
-            {activeFilterCount > 0 && (
-              <button
-                onClick={clearAllFilters}
-                className="flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-medium text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors"
-              >
-                <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-                ล้างตัวกรอง ({activeFilterCount})
-              </button>
-            )}
-            <span className="ml-auto flex items-center gap-3 text-xs text-slate-400">
-              แสดง {filteredTickets.length} จาก {totalTickets} tickets
-              <button
-                onClick={copyViewLink}
-                title="คัดลอกลิงก์ที่มีตัวกรองนี้ ส่งให้ทีมเปิดแล้วเห็นแบบเดียวกัน"
-                className="rounded-lg border border-slate-300 dark:border-slate-600 px-2.5 py-1 font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors"
-              >
-                {copied ? 'คัดลอกแล้ว ✓' : 'คัดลอกลิงก์มุมมองนี้'}
-              </button>
-            </span>
-          </div>
-
-          {/* Active filter chips */}
-          {(buFilter.length > 0 || statusFilter.length > 0 || systemFilter.length > 0 || categoryFilter.length > 0) && (
-            <div className="flex flex-wrap gap-1.5 mb-4">
-              {buFilter.map(v => (
-                <span key={`bu-${v}`} className="flex items-center gap-1 rounded-full bg-blue-50 dark:bg-blue-900/30 px-2.5 py-1 text-xs font-medium text-blue-700 dark:text-blue-300">
-                  BU: {v}
-                  <button onClick={() => setBuFilter(buFilter.filter(x => x !== v))} className="hover:text-blue-900 dark:hover:text-blue-100">
-                    <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
-                  </button>
-                </span>
-              ))}
-              {statusFilter.map(v => (
-                <span key={`st-${v}`} className="flex items-center gap-1 rounded-full bg-orange-50 dark:bg-orange-900/30 px-2.5 py-1 text-xs font-medium text-orange-700 dark:text-orange-300">
-                  Status: {v}
-                  <button onClick={() => setStatusFilter(statusFilter.filter(x => x !== v))} className="hover:text-orange-900 dark:hover:text-orange-100">
-                    <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
-                  </button>
-                </span>
-              ))}
-              {systemFilter.map(v => (
-                <span key={`sys-${v}`} className="flex items-center gap-1 rounded-full bg-teal-50 dark:bg-teal-900/30 px-2.5 py-1 text-xs font-medium text-teal-700 dark:text-teal-300">
-                  System: {v}
-                  <button onClick={() => setSystemFilter(systemFilter.filter(x => x !== v))} className="hover:text-teal-900 dark:hover:text-teal-100">
-                    <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
-                  </button>
-                </span>
-              ))}
-              {categoryFilter.map(v => (
-                <span key={`cat-${v}`} className="flex items-center gap-1 rounded-full bg-purple-50 dark:bg-purple-900/30 px-2.5 py-1 text-xs font-medium text-purple-700 dark:text-purple-300">
-                  Category: {v}
-                  <button onClick={() => setCategoryFilter(categoryFilter.filter(x => x !== v))} className="hover:text-purple-900 dark:hover:text-purple-100">
-                    <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
-                  </button>
-                </span>
-              ))}
+        {/* Ticket table */}
+        <section id="issue-table" aria-labelledby="issues-title" className="scroll-mt-20">
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 id="issues-title" className="section-title">Tickets</h2>
+              <p className="section-note num">แสดง {filteredTickets.length} จาก {totalTickets}</p>
             </div>
-          )}
+            <div className="flex flex-wrap items-center gap-2">
+              <input
+                type="search"
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                placeholder="ค้นหา key, summary, root cause"
+                aria-label="ค้นหา ticket"
+                className="field w-64"
+              />
+              <button onClick={copyViewLink} className="btn" title="คัดลอกลิงก์ที่มีตัวกรองนี้ ส่งให้ทีมเปิดแล้วเห็นแบบเดียวกัน">
+                {copied ? 'คัดลอกแล้ว' : 'คัดลอกลิงก์'}
+              </button>
+            </div>
+          </div>
 
-          {hasActiveFilterOrSearch && <FilteredInsights tickets={filteredTickets} />}
+          <div className="panel">
+            {/* Filter bar */}
+            <div className="flex flex-wrap items-center gap-2 border-b border-line px-4 py-3">
+              <MultiSelectFilter label="Business Unit" options={buOptions} selected={buFilter} onChange={setBuFilter} />
+              <MultiSelectFilter label="Status" options={statusOptions} selected={statusFilter} onChange={setStatusFilter} />
+              <MultiSelectFilter label="ระบบ" options={systemOptions} selected={systemFilter} onChange={setSystemFilter} />
+              <MultiSelectFilter label="Type of Issue" options={categoryOptions} selected={categoryFilter} onChange={setCategoryFilter} />
+              <button
+                onClick={() => setFilters({ incomplete: !incompleteOnly })}
+                aria-pressed={incompleteOnly}
+                className={incompleteOnly ? 'btn border-attention bg-attention-soft text-attention hover:bg-attention-soft' : 'btn'}
+              >
+                ข้อมูลไม่ครบ <span className="num">{incompleteCount}</span>
+              </button>
+              {activeFilterCount > 0 && (
+                <button onClick={clearAllFilters} className="btn-quiet">ล้างตัวกรอง ({activeFilterCount})</button>
+              )}
+            </div>
 
-          <div className="overflow-x-auto -mx-5 px-5">
-            <table className="text-sm" style={{ tableLayout: 'fixed', width: Object.values(colWidths).reduce((a, b) => a + b, 0) + 60 }}>
-              <colgroup>
-                <col style={{ width: colWidths.key }} />
-                <col style={{ width: colWidths.summary }} />
-                <col style={{ width: colWidths.businessUnit }} />
-                <col style={{ width: colWidths.status }} />
-                <col style={{ width: colWidths.typeOfIssue }} />
-                <col style={{ width: colWidths.rootCause }} />
-                <col style={{ width: colWidths.resolution }} />
-                <col style={{ width: colWidths.deployDate }} />
-                <col style={{ width: 50 }} />
-              </colgroup>
-              <thead>
-                <tr className="border-b border-slate-200 dark:border-slate-700">
-                  <SortableHeader label="Key"        sortKey="key"          activeKey={sortKey} dir={sortDir} onSort={handleSort} onResizeStart={startResize('key')} />
-                  <SortableHeader label="Summary"    sortKey="summary"      activeKey={sortKey} dir={sortDir} onSort={handleSort} onResizeStart={startResize('summary')} />
-                  <SortableHeader label="BU"         sortKey="businessUnit" activeKey={sortKey} dir={sortDir} onSort={handleSort} onResizeStart={startResize('businessUnit')} />
-                  <SortableHeader label="Status"     sortKey="status"       activeKey={sortKey} dir={sortDir} onSort={handleSort} onResizeStart={startResize('status')} />
-                  <SortableHeader label="Category"   sortKey="typeOfIssue"  activeKey={sortKey} dir={sortDir} onSort={handleSort} onResizeStart={startResize('typeOfIssue')} />
-                  <SortableHeader label="Root Cause" sortKey="rootCause"    activeKey={sortKey} dir={sortDir} onSort={handleSort} onResizeStart={startResize('rootCause')} />
-                  <SortableHeader label="Resolution" sortKey="resolution"   activeKey={sortKey} dir={sortDir} onSort={handleSort} onResizeStart={startResize('resolution')} />
-                  <SortableHeader label="Deploy"     sortKey="deployDate"   activeKey={sortKey} dir={sortDir} onSort={handleSort} onResizeStart={startResize('deployDate')} />
-                  <th className="text-center py-2 px-3 text-xs font-medium text-slate-500 dark:text-slate-400">
-                    <label className="inline-flex flex-col items-center gap-1 cursor-pointer" title="เลือก/ยกเลิกทุกรายการที่แสดงอยู่ (ตามตัวกรองปัจจุบัน)">
-                      <span>เลือก</span>
+            {(buFilter.length > 0 || statusFilter.length > 0 || systemFilter.length > 0 || categoryFilter.length > 0) && (
+              <div className="flex flex-wrap gap-1.5 border-b border-line px-4 py-2.5">
+                {([
+                  ['BU', buFilter, (v: string) => setBuFilter(buFilter.filter(x => x !== v))],
+                  ['Status', statusFilter, (v: string) => setStatusFilter(statusFilter.filter(x => x !== v))],
+                  ['ระบบ', systemFilter, (v: string) => setSystemFilter(systemFilter.filter(x => x !== v))],
+                  ['Type', categoryFilter, (v: string) => setCategoryFilter(categoryFilter.filter(x => x !== v))],
+                ] as Array<[string, string[], (v: string) => void]>).flatMap(([label, list, remove]) => list.map(v => (
+                  <span key={`${label}-${v}`} className="inline-flex items-center gap-1 rounded bg-accent-soft py-0.5 pl-2 pr-1 text-[12px] text-accent">
+                    {label}: {v}
+                    <button onClick={() => remove(v)} className="rounded px-1 hover:bg-surface" aria-label={`เอาตัวกรอง ${label} ${v} ออก`}>×</button>
+                  </span>
+                )))}
+              </div>
+            )}
+
+            {hasActiveFilterOrSearch && <div className="border-b border-line p-4"><FilteredInsights tickets={filteredTickets} /></div>}
+
+            <div className="overflow-x-auto">
+              <table className="text-[13px]" style={{ tableLayout: 'fixed', width: Object.values(colWidths).reduce((a, b) => a + b, 0) + 60 }}>
+                <colgroup>
+                  <col style={{ width: colWidths.key }} />
+                  <col style={{ width: colWidths.summary }} />
+                  <col style={{ width: colWidths.businessUnit }} />
+                  <col style={{ width: colWidths.status }} />
+                  <col style={{ width: colWidths.typeOfIssue }} />
+                  <col style={{ width: colWidths.rootCause }} />
+                  <col style={{ width: colWidths.resolution }} />
+                  <col style={{ width: colWidths.deployDate }} />
+                  <col style={{ width: 50 }} />
+                </colgroup>
+                <thead className="bg-sunken">
+                  <tr className="border-b border-line">
+                    <SortableHeader label="Key"        sortKey="key"          activeKey={sortKey} dir={sortDir} onSort={handleSort} onResizeStart={startResize('key')} />
+                    <SortableHeader label="Summary"    sortKey="summary"      activeKey={sortKey} dir={sortDir} onSort={handleSort} onResizeStart={startResize('summary')} />
+                    <SortableHeader label="BU"         sortKey="businessUnit" activeKey={sortKey} dir={sortDir} onSort={handleSort} onResizeStart={startResize('businessUnit')} />
+                    <SortableHeader label="Status"     sortKey="status"       activeKey={sortKey} dir={sortDir} onSort={handleSort} onResizeStart={startResize('status')} />
+                    <SortableHeader label="Type"       sortKey="typeOfIssue"  activeKey={sortKey} dir={sortDir} onSort={handleSort} onResizeStart={startResize('typeOfIssue')} />
+                    <SortableHeader label="Root Cause" sortKey="rootCause"    activeKey={sortKey} dir={sortDir} onSort={handleSort} onResizeStart={startResize('rootCause')} />
+                    <SortableHeader label="Resolution" sortKey="resolution"   activeKey={sortKey} dir={sortDir} onSort={handleSort} onResizeStart={startResize('resolution')} />
+                    <SortableHeader label="Deploy"     sortKey="deployDate"   activeKey={sortKey} dir={sortDir} onSort={handleSort} onResizeStart={startResize('deployDate')} />
+                    <th className="px-3 py-2 text-center">
                       <input
                         type="checkbox"
                         checked={allShownSelected}
                         onChange={toggleAllShown}
-                        className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                        aria-label="เลือกทุกรายการที่แสดงอยู่"
+                        title="เลือก/ยกเลิกทุกรายการที่แสดงอยู่"
+                        className="h-4 w-4 cursor-pointer rounded border-line-strong accent-[var(--accent)]"
                       />
-                    </label>
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredTickets.map(t => (
-                  <tr
-                    key={t.key}
-                    onClick={() => openTicket(t.key)}
-                    className="border-b border-slate-100 dark:border-slate-700/50 hover:bg-blue-50 dark:hover:bg-blue-950/20 cursor-pointer transition-colors align-top"
-                  >
-                    <td className="py-2 px-3 font-medium whitespace-nowrap overflow-hidden">
-                      <a
-                        href={jiraBrowseUrl(t.key)}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        onClick={(e) => e.stopPropagation()}
-                        className="text-blue-600 dark:text-blue-400 hover:underline inline-flex items-center gap-1"
-                      >
-                        {t.key}
-                        <svg className="h-3 w-3 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
-                        </svg>
-                      </a>
-                    </td>
-                    <td className="py-2 px-3 text-slate-700 dark:text-slate-200 whitespace-normal break-words overflow-hidden">{t.summary || '—'}</td>
-                    <td className="py-2 px-3 text-slate-600 dark:text-slate-300 whitespace-normal break-words overflow-hidden">{t.businessUnit || '—'}</td>
-                    <td className="py-2 px-3 overflow-hidden">
-                      <span className={`inline-block max-w-full truncate align-middle px-2 py-0.5 rounded-full text-xs font-medium ${statusBadge(t.status)}`}>{t.status}</span>
-                    </td>
-                    <td className="py-2 px-3 text-slate-600 dark:text-slate-300 whitespace-normal break-words overflow-hidden">{t.typeOfIssue || <span className="text-slate-300 dark:text-slate-600">—</span>}</td>
-                    <td className="py-2 px-3 text-slate-600 dark:text-slate-300 whitespace-normal break-words overflow-hidden">{t.rootCause || <span className="text-slate-300 dark:text-slate-600">—</span>}</td>
-                    <td className="py-2 px-3 text-slate-600 dark:text-slate-300 whitespace-normal break-words overflow-hidden">{t.resolution || <span className="text-slate-300 dark:text-slate-600">—</span>}</td>
-                    <td className="py-2 px-3 whitespace-nowrap overflow-hidden">
-                      {t.deployDate ? (
-                        <span className="inline-flex items-center gap-1 text-xs font-medium text-indigo-600 dark:text-indigo-400">
-                          <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4.5 12.75l6 6 9-13.5" />
-                          </svg>
-                          {formatDate(t.deployDate)}
-                        </span>
-                      ) : (
-                        <span className="text-xs text-slate-300 dark:text-slate-600">—</span>
-                      )}
-                    </td>
-                    <td className="py-2 px-3 text-center" onClick={(e) => e.stopPropagation()}>
-                      <input
-                        type="checkbox"
-                        checked={highlighted.has(t.key)}
-                        onChange={() => toggleHighlight(t.key)}
-                        className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
-                      />
-                    </td>
+                    </th>
                   </tr>
-                ))}
-                {!filteredTickets.length && (
-                  <tr><td colSpan={9} className="py-8 text-center text-slate-400 text-sm">
-                    ไม่พบข้อมูลที่ตรงกับตัวกรอง
-                    {activeFilterCount > 0 && (
-                      <button onClick={clearAllFilters} className="ml-2 text-blue-600 dark:text-blue-400 hover:underline">ล้างตัวกรอง</button>
-                    )}
-                  </td></tr>
-                )}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {filteredTickets.map(t => {
+                    const empty = <span className="text-faint">—</span>
+                    return (
+                      <tr
+                        key={t.key}
+                        onClick={() => openTicket(t.key)}
+                        className={`cursor-pointer border-b border-line align-top transition-colors hover:bg-sunken ${highlighted.has(t.key) ? 'bg-accent-soft' : ''}`}
+                      >
+                        <td className="overflow-hidden whitespace-nowrap px-3 py-2">
+                          <a
+                            href={jiraBrowseUrl(t.key)}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            onClick={e => e.stopPropagation()}
+                            className="key text-accent hover:underline"
+                            title="เปิดใน Jira"
+                          >
+                            {t.key}
+                          </a>
+                        </td>
+                        <td className="overflow-hidden whitespace-normal break-words px-3 py-2">{t.summary || empty}</td>
+                        <td className="overflow-hidden whitespace-normal break-words px-3 py-2 text-muted">{t.businessUnit || empty}</td>
+                        <td className="overflow-hidden px-3 py-2"><span className={`chip ${statusBadge(t.status)}`}>{t.status}</span></td>
+                        <td className="overflow-hidden whitespace-normal break-words px-3 py-2 text-muted">{t.typeOfIssue || empty}</td>
+                        <td className="overflow-hidden whitespace-normal break-words px-3 py-2 text-muted">{t.rootCause || empty}</td>
+                        <td className="overflow-hidden whitespace-normal break-words px-3 py-2 text-muted">{t.resolution || empty}</td>
+                        <td className="overflow-hidden whitespace-nowrap px-3 py-2 num">{t.deployDate ? formatDate(t.deployDate) : empty}</td>
+                        <td className="px-3 py-2 text-center" onClick={e => e.stopPropagation()}>
+                          <input
+                            type="checkbox"
+                            checked={highlighted.has(t.key)}
+                            onChange={() => toggleHighlight(t.key)}
+                            aria-label={`เลือก ${t.key}`}
+                            className="h-4 w-4 cursor-pointer rounded border-line-strong accent-[var(--accent)]"
+                          />
+                        </td>
+                      </tr>
+                    )
+                  })}
+                  {!filteredTickets.length && (
+                    <tr><td colSpan={9} className="px-4 py-10 text-center text-[13px] text-muted">
+                      ไม่มี ticket ที่ตรงกับตัวกรองนี้
+                      {activeFilterCount > 0 && <button onClick={clearAllFilters} className="link ml-2">ล้างตัวกรอง</button>}
+                    </td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
-          <p className="text-xs text-slate-400 mt-3">คลิกแถวเพื่อดูรายละเอียดเต็ม · คลิกหัวตารางเพื่อเรียงลำดับ · ในหน้าต่าง ticket กด ← / → เพื่อเลื่อนใบ</p>
-        </div>
-
+          <p className="mt-2 text-[12px] text-faint">คลิกแถวเพื่อเปิดรายละเอียด ลากขอบหัวตารางเพื่อปรับความกว้าง ในหน้าต่าง ticket ใช้ปุ่มลูกศรซ้ายขวาเพื่อเลื่อนใบ</p>
+        </section>
       </main>
 
       {bulkOpen && data && (

@@ -30,7 +30,7 @@ function Delta({ k }: { k?: CompareKpi }) {
 function Section({ title, children, className = '' }: { title: string; children: React.ReactNode; className?: string }) {
   return (
     <section className={`break-inside-avoid ${className}`}>
-      <h2 className="text-[13px] font-semibold uppercase tracking-wide text-slate-500 border-b border-slate-200 pb-1 mb-2">{title}</h2>
+      <h2 className="mb-2 border-b border-slate-300 pb-1 text-[13px] font-semibold text-slate-900">{title}</h2>
       {children}
     </section>
   )
@@ -120,7 +120,7 @@ export default function ReportSummaryPage() {
                 <option key={r.id} value={r.id}>{r.name} ({formatDate(r.createdAt)})</option>
               ))}
             </select>
-            <button onClick={() => window.print()} className="rounded-lg bg-blue-600 px-3 py-1.5 font-medium text-white hover:bg-blue-700">
+            <button onClick={() => window.print()} className="btn-primary">
               พิมพ์ / บันทึกเป็น PDF
             </button>
           </div>
@@ -129,9 +129,9 @@ export default function ReportSummaryPage() {
 
       {/* The page */}
       <article className="mx-auto my-6 print:my-0 max-w-[210mm] bg-white shadow print:shadow-none px-[12mm] py-[10mm] space-y-5 text-[12px] leading-relaxed">
-        <header className="flex items-end justify-between border-b-2 border-slate-800 pb-2">
+        <header className="flex items-end justify-between border-b-2 border-[#006a7a] pb-2">
           <div>
-            <p className="text-[11px] uppercase tracking-wider text-slate-500">CTS Tech Support — สรุปประจำสัปดาห์</p>
+            <p className="text-[12px] text-slate-500">สรุปประจำสัปดาห์ ทีม CTS Tech Support</p>
             <h1 className="text-xl font-bold text-slate-900">{data.name}</h1>
             <p className="text-slate-500">
               {stats.range ? `ticket สร้างระหว่าง ${formatDate(stats.range.from.toISOString())} – ${formatDate(stats.range.to.toISOString())} · ` : ''}
