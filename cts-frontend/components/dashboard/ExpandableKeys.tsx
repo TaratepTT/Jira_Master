@@ -13,7 +13,7 @@ const JIRA_BASE_URL = 'https://ascendcommerce-support.atlassian.net/browse'
 export default function ExpandableKeys({ keys }: Props) {
   const [expanded, setExpanded] = useState(false)
 
-  if (!keys.length) return <span className="text-slate-300 dark:text-slate-600">-</span>
+  if (!keys.length) return <span className="text-faint">-</span>
 
   const PREVIEW_COUNT = 6
   const previewKeys = keys.slice(0, PREVIEW_COUNT)
@@ -25,7 +25,7 @@ export default function ExpandableKeys({ keys }: Props) {
       target="_blank"
       rel="noopener noreferrer"
       onClick={e => e.stopPropagation()}
-      className="text-blue-600 dark:text-blue-400 hover:underline"
+      className="text-accent hover:underline"
     >
       {k}
     </a>
@@ -46,7 +46,7 @@ export default function ExpandableKeys({ keys }: Props) {
         {(hasMore || keys.length > 0) && (
           <button
             onClick={() => setExpanded(true)}
-            className="flex-shrink-0 text-[11px] font-medium text-slate-500 dark:text-slate-400 underline hover:text-slate-700 dark:hover:text-slate-200 whitespace-nowrap"
+            className="flex-shrink-0 text-[11px] font-medium text-muted underline hover:text-ink whitespace-nowrap"
           >
             ดูทั้งหมด ({keys.length})
           </button>
@@ -59,14 +59,14 @@ export default function ExpandableKeys({ keys }: Props) {
     <div className="max-w-md">
       <div className="flex flex-wrap gap-1">
         {keys.map(k => (
-          <span key={k} className="text-xs bg-blue-50 dark:bg-blue-950/30 rounded px-1.5 py-0.5">
+          <span key={k} className="text-xs bg-accent-soft rounded px-1.5 py-0.5">
             <KeyLink k={k} />
           </span>
         ))}
       </div>
       <button
         onClick={() => setExpanded(false)}
-        className="mt-1.5 text-[11px] font-medium text-slate-500 dark:text-slate-400 underline hover:text-slate-700 dark:hover:text-slate-200"
+        className="mt-1.5 text-[11px] font-medium text-muted underline hover:text-ink"
       >
         ย่อกลับ
       </button>

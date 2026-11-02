@@ -2,9 +2,105 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ── Design tokens ───────────────────────────────────────────────
+   One calm neutral base, one accent (petrol teal) for actions and
+   links, and three reserved state colours: attention (amber — waiting,
+   missing data), danger (red — L3 / errors), ok (green — closed).
+   Dark mode uses its own steps, not an inverted light theme. */
+:root {
+  --paper: #f7f7f5;
+  --surface: #ffffff;
+  --sunken: #f1f1ee;
+  --ink: #1b1f23;
+  --muted: #646a73;
+  --faint: #8d939b;
+  --line: #e3e3df;
+  --line-strong: #cfcfca;
+  --accent: #006a7a;
+  --accent-strong: #00515e;
+  --accent-soft: #e3f1f3;
+  --on-accent: #ffffff;
+  --chart-a: #0089a3;
+  --chart-b: #b45309;
+  --attention: #a15c07;
+  --attention-soft: #fbf1e2;
+  --danger: #b42318;
+  --danger-soft: #fcebea;
+  --ok: #1e7b4e;
+  --ok-soft: #e6f4ec;
+  color-scheme: light;
+}
+.dark {
+  --paper: #121518;
+  --surface: #1b1f23;
+  --sunken: #16191c;
+  --ink: #e6e8ea;
+  --muted: #9aa1a9;
+  --faint: #6f767e;
+  --line: #2c3238;
+  --line-strong: #3a4148;
+  --accent: #4dbccd;
+  --accent-strong: #7ad0dd;
+  --accent-soft: #12323a;
+  --on-accent: #0b2a30;
+  --chart-a: #14a3ba;
+  --chart-b: #d97706;
+  --attention: #e7a54b;
+  --attention-soft: #33260f;
+  --danger: #f07468;
+  --danger-soft: #3a1d1a;
+  --ok: #5cc08c;
+  --ok-soft: #15301f;
+  color-scheme: dark;
+}
+
 @layer base {
   html {
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
   }
+  body {
+    font-feature-settings: 'tnum' 0;
+  }
+  :focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+}
+
+@layer components {
+  /* surfaces */
+  .panel { @apply rounded-lg border border-line bg-surface; }
+  .panel-pad { @apply p-5; }
+  .section-title { @apply text-[15px] font-semibold text-ink; }
+  .section-note { @apply text-[13px] text-muted; }
+
+  /* numbers line up in columns */
+  .num { font-variant-numeric: tabular-nums; }
+  /* ticket keys are identifiers — monospace so they scan and compare well */
+  .key { font-family: var(--font-mono); font-size: 0.92em; letter-spacing: -0.01em; }
+
+  /* buttons */
+  .btn {
+    @apply inline-flex items-center justify-center gap-1.5 rounded-md border border-line-strong bg-surface px-3 py-1.5 text-[13px] font-medium text-ink transition-colors hover:bg-sunken disabled:cursor-not-allowed disabled:opacity-50;
+  }
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-1.5 rounded-md bg-accent px-3 py-1.5 text-[13px] font-medium text-on-accent transition-colors hover:bg-accent-strong disabled:cursor-not-allowed disabled:opacity-50;
+  }
+  .btn-quiet {
+    @apply inline-flex items-center gap-1 rounded-md px-2 py-1 text-[13px] font-medium text-muted transition-colors hover:bg-sunken hover:text-ink;
+  }
+  .link { @apply text-accent hover:underline underline-offset-2; }
+
+  /* form controls */
+  .field {
+    @apply w-full rounded-md border border-line-strong bg-surface px-2.5 py-1.5 text-[13px] text-ink outline-none transition-colors placeholder:text-faint focus:border-accent;
+  }
+
+  /* status chip: neutral by default; closed = ok, L3 = danger */
+  .chip { @apply inline-flex max-w-full items-center truncate rounded px-1.5 py-0.5 text-[12px] font-medium leading-tight; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
 }

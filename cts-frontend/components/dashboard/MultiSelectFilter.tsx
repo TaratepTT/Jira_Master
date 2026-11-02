@@ -32,13 +32,13 @@ export default function MultiSelectFilter({ label, options, selected, onChange }
         onClick={() => setOpen(o => !o)}
         className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
           selected.length
-            ? 'border-blue-300 bg-blue-50 text-blue-700 dark:border-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
-            : 'border-slate-300 bg-white text-slate-600 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700'
+            ? 'border-accent bg-accent-soft text-accent'
+            : 'border-line-strong bg-surface text-muted hover:bg-sunken'
         }`}
       >
         {label}
         {selected.length > 0 && (
-          <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-blue-600 px-1 text-[10px] font-semibold text-white">
+          <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[10px] font-semibold text-on-accent">
             {selected.length}
           </span>
         )}
@@ -48,11 +48,11 @@ export default function MultiSelectFilter({ label, options, selected, onChange }
       </button>
 
       {open && (
-        <div className="absolute z-20 mt-1.5 w-64 rounded-xl border border-slate-200 bg-white p-2 shadow-lg dark:border-slate-700 dark:bg-slate-800">
+        <div className="absolute z-20 mt-1.5 w-64 rounded-lg border border-line bg-surface p-2 shadow-lg">
           {selected.length > 0 && (
             <button
               onClick={() => onChange([])}
-              className="mb-1 w-full rounded-lg px-2 py-1.5 text-left text-xs text-blue-600 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-900/30 transition-colors"
+              className="mb-1 w-full rounded-lg px-2 py-1.5 text-left text-xs text-accent hover:bg-accent-soft transition-colors"
             >
               ล้างตัวกรองทั้งหมด
             </button>
@@ -61,22 +61,22 @@ export default function MultiSelectFilter({ label, options, selected, onChange }
             {options.map(opt => (
               <label
                 key={opt.value}
-                className="flex items-center justify-between gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50 dark:hover:bg-slate-700 cursor-pointer transition-colors"
+                className="flex items-center justify-between gap-2 rounded-lg px-2 py-1.5 hover:bg-sunken cursor-pointer transition-colors"
               >
                 <span className="flex items-center gap-2 min-w-0">
                   <input
                     type="checkbox"
                     checked={selected.includes(opt.value)}
                     onChange={() => toggle(opt.value)}
-                    className="h-3.5 w-3.5 rounded border-slate-300 text-blue-600 focus:ring-blue-500 flex-shrink-0"
+                    className="h-3.5 w-3.5 rounded border-line-strong text-accent focus:ring-accent flex-shrink-0"
                   />
-                  <span className="text-xs text-slate-700 dark:text-slate-200 truncate">{opt.value}</span>
+                  <span className="text-xs text-ink truncate">{opt.value}</span>
                 </span>
-                <span className="text-xs text-slate-400 flex-shrink-0">{opt.count}</span>
+                <span className="text-xs text-faint flex-shrink-0">{opt.count}</span>
               </label>
             ))}
             {!options.length && (
-              <p className="px-2 py-3 text-xs text-slate-400 text-center">ไม่มีตัวเลือก</p>
+              <p className="px-2 py-3 text-xs text-faint text-center">ไม่มีตัวเลือก</p>
             )}
           </div>
         </div>

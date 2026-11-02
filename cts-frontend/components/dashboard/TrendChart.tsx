@@ -50,146 +50,72 @@ function getDayKey(date: Date): string {
 // ── SVG Line Chart ─────────────────────────────────────────────
 interface LinePoint { label: string; open: number; closed: number; total: number }
 
+// Whole-number ticks only (ticket counts), at most ~5 lines
+function intTicks(max: number): number[] {
+  const step = Math.max(1, Math.ceil(max / 4))
+  const top = Math.max(step, Math.ceil(max / step) * step)
+  const out: number[] = []
+  for (let v = 0; v <= top; v += step) out.push(v)
+  return out
+}
+
 function LineChart({ points }: { points: LinePoint[] }) {
+  const [hover, setHover] = useState<number | null>(null)
   if (points.length < 2) {
-    return (
-      <div className="flex items-center justify-center h-48 text-sm text-slate-400">
-        ข้อมูลไม่เพียงพอสำหรับแสดงกราฟเส้น (ต้องการอย่างน้อย 2 จุด)
-      </div>
-    )
+    return <p className="py-10 text-center text-[13px] text-faint">ต้องมีข้อมูลอย่างน้อย 2 ช่วงเวลาถึงจะวาดกราฟได้</p>
   }
+  const W = 960, H = 210
+  const PAD = { top: 14, right: 16, bottom: 30, left: 34 }
+  const cw = W - PAD.left - PAD.right, ch = H - PAD.top - PAD.bottom
+  const ticks = intTicks(Math.max(...points.map(p => p.total), 1))
+  const maxY = ticks[ticks.length - 1]
+  const step = cw / (points.length - 1)
+  const x = (i: number) => PAD.left + i * step
+  const y = (v: number) => PAD.top + ch - (v / maxY) * ch
+  const path = (k: 'total' | 'closed' | 'open') => points.map((p, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(p[k]).toFixed(1)}`).join(' ')
+  const area = `${path('total')} L${x(points.length - 1)},${PAD.top + ch} L${PAD.left},${PAD.top + ch} Z`
+  const every = Math.max(1, Math.ceil(points.length / 10))
+  const hp = hover !== null ? points[hover] : null
 
-  const W = 600
-  const H = 180
-  const PAD = { top: 16, right: 20, bottom: 40, left: 36 }
-  const chartW = W - PAD.left - PAD.right
-  const chartH = H - PAD.top - PAD.bottom
-
-  const maxY = Math.max(...points.map(p => p.total), 1)
-  const xStep = chartW / (points.length - 1)
-
-  const toX = (i: number) => PAD.left + i * xStep
-  const toY = (v: number) => PAD.top + chartH - (v / maxY) * chartH
-
-  // Build SVG path
-  const pathTotal  = points.map((p, i) => `${i === 0 ? 'M' : 'L'}${toX(i).toFixed(1)},${toY(p.total).toFixed(1)}`).join(' ')
-  const pathClosed = points.map((p, i) => `${i === 0 ? 'M' : 'L'}${toX(i).toFixed(1)},${toY(p.closed).toFixed(1)}`).join(' ')
-  const pathOpen   = points.map((p, i) => `${i === 0 ? 'M' : 'L'}${toX(i).toFixed(1)},${toY(p.open).toFixed(1)}`).join(' ')
-
-  // Area fill for total
-  const areaTotal = `${pathTotal} L${toX(points.length-1).toFixed(1)},${(PAD.top+chartH).toFixed(1)} L${PAD.left.toFixed(1)},${(PAD.top+chartH).toFixed(1)} Z`
-
-  // Y-axis grid lines
-  const gridLines = [0, 0.25, 0.5, 0.75, 1].map(f => ({
-    y: PAD.top + chartH * (1 - f),
-    label: Math.round(maxY * f),
-  }))
-
-  // Hover state
   return (
-    <div className="relative w-full overflow-x-auto">
-      <svg
-        viewBox={`0 0 ${W} ${H}`}
-        className="w-full"
-        style={{ minWidth: Math.max(points.length * 60, 320) }}
-      >
-        {/* Grid lines */}
-        {gridLines.map(g => (
-          <g key={g.y}>
-            <line
-              x1={PAD.left} y1={g.y} x2={W - PAD.right} y2={g.y}
-              stroke="currentColor" strokeOpacity="0.08" strokeWidth="1"
-              className="text-slate-500"
-            />
-            <text
-              x={PAD.left - 6} y={g.y + 4}
-              textAnchor="end" fontSize="10"
-              className="fill-slate-400"
-            >{g.label}</text>
+    <div className="relative overflow-x-auto">
+      <svg viewBox={`0 0 ${W} ${H}`} className="h-auto w-full min-w-[600px]" role="img" aria-label="จำนวน ticket ตามวันที่สร้าง แยกตามสถานะปัจจุบัน">
+        {ticks.map(t => (
+          <g key={t}>
+            <line x1={PAD.left} x2={W - PAD.right} y1={y(t)} y2={y(t)} className="stroke-line" strokeWidth={1} />
+            <text x={PAD.left - 8} y={y(t) + 4} textAnchor="end" fontSize="11" className="fill-faint">{t}</text>
           </g>
         ))}
-
-        {/* Area fill */}
-        <path d={areaTotal} fill="#3b82f6" fillOpacity="0.07" />
-
-        {/* Lines */}
-        <path d={pathTotal}  fill="none" stroke="#3b82f6" strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />
-        <path d={pathClosed} fill="none" stroke="#10b981" strokeWidth="2"   strokeLinejoin="round" strokeLinecap="round" strokeDasharray="0" />
-        <path d={pathOpen}   fill="none" stroke="#f59e0b" strokeWidth="2"   strokeLinejoin="round" strokeLinecap="round" strokeDasharray="4 2" />
-
-        {/* Data points + tooltips */}
+        <path d={area} className="fill-sunken" />
+        <path d={path('total')} fill="none" className="stroke-faint" strokeWidth={1.5} strokeLinejoin="round" />
+        <path d={path('closed')} fill="none" className="stroke-chart-a" strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
+        <path d={path('open')} fill="none" className="stroke-chart-b" strokeWidth={2} strokeDasharray="5 3" strokeLinejoin="round" strokeLinecap="round" />
         {points.map((p, i) => (
-          <g key={i} className="group">
-            {/* X-axis label */}
-            <text
-              x={toX(i)} y={H - 6}
-              textAnchor="middle" fontSize="10"
-              className="fill-slate-400"
-            >{p.label}</text>
-
-            {/* Vertical hover line */}
-            <line
-              x1={toX(i)} y1={PAD.top} x2={toX(i)} y2={PAD.top + chartH}
-              stroke="currentColor" strokeWidth="1" strokeOpacity="0"
-              className="text-slate-400 group-hover:stroke-opacity-30 transition-all"
-            />
-
-            {/* Dots */}
-            <circle cx={toX(i)} cy={toY(p.total)}  r="4" fill="#3b82f6" className="opacity-0 group-hover:opacity-100 transition-opacity" />
-            <circle cx={toX(i)} cy={toY(p.closed)} r="3.5" fill="#10b981" className="opacity-0 group-hover:opacity-100 transition-opacity" />
-            <circle cx={toX(i)} cy={toY(p.open)}   r="3.5" fill="#f59e0b" className="opacity-0 group-hover:opacity-100 transition-opacity" />
-
-            {/* Tooltip box */}
-            <g className="opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
-              <rect
-                x={Math.min(toX(i) - 44, W - PAD.right - 90)}
-                y={PAD.top}
-                width="90" height="60"
-                rx="6"
-                fill="currentColor" fillOpacity="0.92"
-                className="text-slate-800 dark:text-slate-700"
-              />
-              <text x={Math.min(toX(i) - 44, W - PAD.right - 90) + 8} y={PAD.top + 16} fontSize="10" fontWeight="600" className="fill-slate-100">{p.label}</text>
-              <text x={Math.min(toX(i) - 44, W - PAD.right - 90) + 8} y={PAD.top + 30} fontSize="10" className="fill-blue-300">Total: {p.total}</text>
-              <text x={Math.min(toX(i) - 44, W - PAD.right - 90) + 8} y={PAD.top + 43} fontSize="10" className="fill-emerald-400">Closed: {p.closed}</text>
-              <text x={Math.min(toX(i) - 44, W - PAD.right - 90) + 8} y={PAD.top + 56} fontSize="10" className="fill-amber-400">Open: {p.open}</text>
-            </g>
+          <g key={i}>
+            {i % every === 0 && <text x={x(i)} y={H - 8} textAnchor="middle" fontSize="11" className="fill-faint">{p.label}</text>}
+            {hover === i && (
+              <>
+                <line x1={x(i)} x2={x(i)} y1={PAD.top} y2={PAD.top + ch} className="stroke-line-strong" strokeWidth={1} />
+                <circle cx={x(i)} cy={y(p.closed)} r={4.5} className="fill-chart-a stroke-surface" strokeWidth={2} />
+                <circle cx={x(i)} cy={y(p.open)} r={4.5} className="fill-chart-b stroke-surface" strokeWidth={2} />
+              </>
+            )}
+            <rect x={x(i) - step / 2} y={PAD.top} width={step} height={ch + 20} fill="transparent"
+              onMouseEnter={() => setHover(i)} onMouseLeave={() => setHover(null)} />
           </g>
         ))}
       </svg>
-    </div>
-  )
-}
-
-// ── Week comparison card ───────────────────────────────────────
-function WeekCompareCard({
-  label, current, previous,
-}: {
-  label: string
-  current: number
-  previous: number
-}) {
-  const diff = current - previous
-  const pct  = previous > 0 ? Math.round(Math.abs(diff) / previous * 100) : 0
-  const up   = diff > 0
-  const same = diff === 0
-
-  return (
-    <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-3">
-      <p className="text-xs text-slate-400 mb-1">{label}</p>
-      <p className="text-2xl font-bold text-slate-800 dark:text-slate-100">{current}</p>
-      <div className="flex items-center gap-1 mt-1">
-        {same ? (
-          <span className="text-xs text-slate-400">— เท่าเดิม</span>
-        ) : (
-          <>
-            <span className={`text-xs font-medium ${up ? 'text-rose-500' : 'text-emerald-500'}`}>
-              {up ? '▲' : '▼'} {pct}%
-            </span>
-            <span className="text-xs text-slate-400">vs สัปดาห์ที่แล้ว ({previous})</span>
-          </>
-        )}
-      </div>
+      {hp && hover !== null && (
+        <div
+          className="pointer-events-none absolute top-0 z-10 rounded-md border border-line bg-surface px-3 py-2 text-[12px] shadow-sm"
+          style={{ left: `${Math.min(78, Math.max(0, (x(hover) / W) * 100 - 8))}%` }}
+        >
+          <p className="mb-0.5 font-medium text-ink">{hp.label}</p>
+          <p className="text-muted">สร้างทั้งหมด <span className="num font-medium text-ink">{hp.total}</span></p>
+          <p className="text-muted">ปิดแล้ว <span className="num font-medium text-ink">{hp.closed}</span></p>
+          <p className="text-muted">ยังเปิด <span className="num font-medium text-ink">{hp.open}</span></p>
+        </div>
+      )}
     </div>
   )
 }
@@ -255,34 +181,26 @@ export default function TrendChart({ tickets }: TrendChartProps) {
     return { thisWeek: tw, lastWeek: lw }
   }, [ticketsWithDate])
 
+  const delta = thisWeek.total - lastWeek.total
   return (
-    <div className="rounded-2xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 p-5 space-y-5">
-
-      {/* Header */}
+    <div className="panel panel-pad">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-200 flex items-center gap-2">
-            <svg className="h-4 w-4 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 3v18h18M7 16l4-4 4 4 4-8" />
-            </svg>
-            Ticket Trend — เปรียบเทียบตามเวลา
-          </h2>
-          <p className="text-xs text-slate-400 mt-0.5">
-            เส้นน้ำเงิน = Total · เส้นเขียว = Closed · เส้นเหลือง (ประ) = Open
+          <h2 className="section-title">ticket ที่สร้างใหม่ตามช่วงเวลา</h2>
+          <p className="section-note mt-0.5">
+            สัปดาห์นี้สร้างใหม่ <span className="num text-ink">{thisWeek.total}</span> ใบ
+            {lastWeek.total || thisWeek.total
+              ? <> ({delta === 0 ? 'เท่ากับ' : delta > 0 ? `มากกว่า ${delta} ใบจาก` : `น้อยกว่า ${-delta} ใบจาก`}สัปดาห์ก่อนที่มี <span className="num">{lastWeek.total}</span> ใบ)</>
+              : null}
           </p>
         </div>
-
-        {/* Toggle weekly / daily */}
-        <div className="flex rounded-lg border border-slate-200 dark:border-slate-600 overflow-hidden text-xs font-medium">
+        <div className="flex overflow-hidden rounded-md border border-line-strong text-[12px] font-medium" role="group" aria-label="ช่วงเวลา">
           {(['weekly', 'daily'] as ViewMode[]).map(m => (
             <button
               key={m}
               onClick={() => setViewMode(m)}
-              className={`px-3 py-1.5 transition-colors ${
-                viewMode === m
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700'
-              }`}
+              aria-pressed={viewMode === m}
+              className={`px-3 py-1 transition-colors ${viewMode === m ? 'bg-sunken text-ink' : 'bg-surface text-muted hover:text-ink'}`}
             >
               {m === 'weekly' ? 'รายสัปดาห์' : 'รายวัน'}
             </button>
@@ -290,70 +208,19 @@ export default function TrendChart({ tickets }: TrendChartProps) {
         </div>
       </div>
 
-      {/* No date warning */}
-      {noDateCount > 0 && (
-        <div className="rounded-lg border border-amber-200 dark:border-amber-800/50 bg-amber-50 dark:bg-amber-950/20 px-4 py-2.5 text-xs text-amber-700 dark:text-amber-400 flex items-center gap-2">
-          <svg className="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126z" />
-          </svg>
-          มี <strong>{noDateCount} ticket</strong> ที่ยังไม่มีวันที่สร้าง — จะแสดงหลัง Sync ใหม่
-        </div>
-      )}
-
-      {/* Week-on-week comparison */}
-      <div>
-        <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 mb-2 uppercase tracking-wide">
-          สัปดาห์นี้ vs สัปดาห์ที่แล้ว
-        </p>
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-          <WeekCompareCard label="Total Tickets"  current={thisWeek.total}  previous={lastWeek.total} />
-          <WeekCompareCard label="Closed"         current={thisWeek.closed} previous={lastWeek.closed} />
-          <WeekCompareCard label="Open / Pending" current={thisWeek.open}   previous={lastWeek.open} />
-        </div>
-      </div>
-
-      {/* Line chart */}
-      <div className="border-t border-slate-100 dark:border-slate-700 pt-4">
-        <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 mb-3 uppercase tracking-wide">
-          Trend {viewMode === 'weekly' ? 'รายสัปดาห์' : 'รายวัน'}
-        </p>
-
-        {ticketsWithDate.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-12 gap-3 text-slate-400">
-            <svg className="h-10 w-10 opacity-30" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 3v18h18M7 16l4-4 4 4 4-8" />
-            </svg>
-            <p className="text-sm">ยังไม่มีข้อมูลวันที่</p>
-            <p className="text-xs text-center max-w-xs">
-              Sync ข้อมูลจาก Jira ใหม่หลัง deploy ครั้งนี้<br/>เพื่อให้ระบบบันทึกวันที่สร้าง ticket
-            </p>
+      {ticketsWithDate.length === 0 ? (
+        <p className="py-10 text-center text-[13px] text-faint">ยังไม่มีวันที่สร้างของ ticket — sync ข้อมูลจาก Jira ใหม่อีกครั้ง</p>
+      ) : (
+        <>
+          <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-1 text-[12px] text-muted">
+            <span className="flex items-center gap-1.5"><svg width="18" height="6" aria-hidden><line x1="0" y1="3" x2="18" y2="3" className="stroke-chart-a" strokeWidth="2" /></svg>ปิดแล้ว (สถานะปัจจุบัน)</span>
+            <span className="flex items-center gap-1.5"><svg width="18" height="6" aria-hidden><line x1="0" y1="3" x2="18" y2="3" className="stroke-chart-b" strokeWidth="2" strokeDasharray="5 3" /></svg>ยังเปิด</span>
+            <span className="flex items-center gap-1.5"><svg width="18" height="6" aria-hidden><line x1="0" y1="3" x2="18" y2="3" className="stroke-faint" strokeWidth="1.5" /></svg>รวม</span>
           </div>
-        ) : (
-          <>
-            <LineChart points={points} />
-
-            {/* Legend */}
-            <div className="flex flex-wrap items-center gap-4 mt-3 text-xs text-slate-500 dark:text-slate-400">
-              <span className="flex items-center gap-1.5">
-                <span className="inline-block h-0.5 w-6 bg-blue-500 rounded" />
-                Total
-              </span>
-              <span className="flex items-center gap-1.5">
-                <span className="inline-block h-0.5 w-6 bg-emerald-500 rounded" />
-                Closed
-              </span>
-              <span className="flex items-center gap-1.5">
-                <span className="inline-block h-0.5 w-4 bg-amber-400 rounded" style={{borderBottom:'2px dashed #f59e0b', background:'none', height:0}} />
-                <svg width="24" height="4"><line x1="0" y1="2" x2="24" y2="2" stroke="#f59e0b" strokeWidth="2" strokeDasharray="4 2"/></svg>
-                Open
-              </span>
-              <span className="ml-auto text-slate-400">
-                {ticketsWithDate.length} tickets · {points.length} {viewMode === 'weekly' ? 'สัปดาห์' : 'วัน'}
-              </span>
-            </div>
-          </>
-        )}
-      </div>
+          <div className="mt-2"><LineChart points={points} /></div>
+          {noDateCount > 0 && <p className="mt-2 text-[12px] text-faint">มี {noDateCount} ticket ที่ไม่มีวันที่สร้าง จึงไม่อยู่ในกราฟ</p>}
+        </>
+      )}
     </div>
   )
 }

@@ -14,14 +14,15 @@ export const TYPE_OF_ISSUE_OPTIONS = [
 
 export function pct(n: number, total: number) { return total ? Math.round(n / total * 100) : 0 }
 
-const STATUS_COLOR: Record<string, string> = {
-  closed: 'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-400',
-  'l3-investigate': 'bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-400',
-  default: 'bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300',
-}
+// Status chip colours: most statuses stay neutral; only finished (ok), L3 (danger) and
+// "almost done" (Resolved / CLOSING, accent) get a colour, so colour still means something.
 export function statusBadge(s: string) {
-  const k = (s ?? '').toLowerCase().replace(/\s+/g, '-')
-  return STATUS_COLOR[k] ?? (k.includes('l3') || k.includes('invest') ? STATUS_COLOR['l3-investigate'] : STATUS_COLOR.default)
+  const l = (s ?? '').toLowerCase()
+  if (l.includes('closed') || l.includes('done')) return 'bg-ok-soft text-ok'
+  if (l.includes('l3') || l.includes('invest')) return 'bg-danger-soft text-danger'
+  if (l.includes('resolved') || l.includes('closing')) return 'bg-accent-soft text-accent'
+  if (l.includes('cancel') || l.includes('reject')) return 'bg-sunken text-faint'
+  return 'bg-sunken text-muted'
 }
 
 export function formatDate(d?: string | null) {
