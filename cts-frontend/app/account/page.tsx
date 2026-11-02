@@ -1,11 +1,12 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useAuth } from '@/components/auth/AuthContext'
 import ThemeToggle from '@/components/theme/ThemeToggle'
 import LogoutButton from '@/components/auth/LogoutButton'
 import { changePassword } from '@/lib/api'
+import JiraConnectionCard from '@/components/auth/JiraConnectionCard'
 
 const inputCls =
   'w-full rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 px-3.5 py-2.5 text-sm text-slate-800 dark:text-slate-100 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-900/50 transition-colors'
@@ -24,6 +25,17 @@ export default function AccountPage() {
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   const [saving, setSaving] = useState(false)
+  // message passed back by /account/jira-callback (?jira=...)
+  const [jiraNotice, setJiraNotice] = useState<string | undefined>(undefined)
+  const [noticeRead, setNoticeRead] = useState(false)
+  useEffect(() => {
+    const n = new URLSearchParams(window.location.search).get('jira')
+    if (n) {
+      setJiraNotice(n)
+      window.history.replaceState(null, '', window.location.pathname)
+    }
+    setNoticeRead(true)
+  }, [])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -71,6 +83,8 @@ export default function AccountPage() {
             <dt className="text-slate-400">สิทธิ์</dt><dd className="text-slate-800 dark:text-slate-100">{user ? ROLE_LABEL[user.role] : '—'}</dd>
           </dl>
         </section>
+
+        {noticeRead && <JiraConnectionCard notice={jiraNotice} />}
 
         <form onSubmit={handleSubmit} className="rounded-2xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 p-5 space-y-4">
           <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-200">เปลี่ยนรหัสผ่าน</h2>

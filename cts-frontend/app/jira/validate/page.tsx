@@ -1,10 +1,18 @@
 'use client'
 
-import { Suspense, useEffect, useMemo, useState } from 'react'
+import { Fragment, Suspense, useEffect, useMemo, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import api from '@/lib/api'
 import ThemeToggle from '@/components/theme/ThemeToggle'
+import { TYPE_OF_ISSUE_OPTIONS } from '@/components/dashboard/utils'
+
+// Value of a field found in an earlier report for the same ticket (Jira has it empty)
+interface CarryValue { value: string; reportName: string; reportDate: string }
+type CarryField = 'businessUnit' | 'typeOfIssue' | 'rootCause' | 'resolution' | 'deployDate'
+const CARRY_LABEL: Record<CarryField, string> = {
+  businessUnit: 'BU', typeOfIssue: 'Type of Issue', rootCause: 'Root Cause', resolution: 'Resolution', deployDate: 'Deploy Date',
+}
 
 interface PreviewTicket {
   key: string
@@ -21,6 +29,9 @@ interface PreviewTicket {
   assignee?: string
   priority?: string
   suggestedCategory?: string | null
+  ticketCreatedAt?: string | null
+  resolvedAt?: string | null
+  carryOver?: Partial<Record<CarryField, CarryValue>>
   problems: string[]
   valid: boolean
 }
@@ -36,7 +47,7 @@ type SaveState =
   | { state: 'error'; message: string }
 
 type ViewFilter = 'all' | 'valid' | 'invalid'
-type EditableField = 'summary' | 'businessUnit' | 'status' | 'typeOfIssue' | 'rootCause' | 'resolution'
+type EditableField = 'summary' | 'businessUnit' | 'status' | 'typeOfIssue' | 'rootCause' | 'resolution' | 'deployDate'
 
 const REQUIRED_FIELDS: Array<{ key: EditableField | 'key' | 'system'; label: string }> = [
   { key: 'key',          label: 'ไม่มี Key' },
@@ -185,7 +196,7 @@ function ValidateScreenInner() {
 
   const typeOfIssueOptions = useMemo(() => {
     const set = new Set(tickets.map(t => t.typeOfIssue).filter(Boolean))
-    ;['Non-app issue', 'App issue', 'User request', 'Human Error', 'Data Issue', 'Other', 'Monitor', 'Referral', 'Bug Issue', 'Alert', 'Q&A'].forEach(s => set.add(s))
+    TYPE_OF_ISSUE_OPTIONS.forEach(s => set.add(s))
     return Array.from(set).sort()
   }, [tickets])
 
@@ -196,6 +207,39 @@ function ValidateScreenInner() {
       return prev.map(t => t.key === key ? revalidate({ ...t, [field]: value }, allKeys) : t)
     })
   }
+
+  // ── Carry-over from earlier reports ───────────────────────────
+  // A suggestion is "pending" while the field is still empty; accepting it fills the field
+  // (it is then saved into the new report like any inline edit).
+  const pendingCarry = (t: PreviewTicket): CarryField[] =>
+    (Object.keys(t.carryOver ?? {}) as CarryField[]).filter(f => !String(t[f] ?? '').trim())
+  const carryTicketCount = useMemo(() => tickets.filter(t => pendingCarry(t).length > 0).length, [tickets])
+  const carryFieldCount = useMemo(() => tickets.reduce((n, t) => n + pendingCarry(t).length, 0), [tickets])
+
+  // Fill carried values. A ticket that becomes valid because of it is also ticked for saving
+  // (it was left unticked at load time only because it had missing fields).
+  const applyCarryTo = (pick: (t: PreviewTicket) => CarryField[]) => {
+    const allKeys = tickets.map(t => t.key)
+    const nowValid: string[] = []
+    const next = tickets.map(t => {
+      const fields = pick(t)
+      if (!fields.length) return t
+      const patch: Partial<PreviewTicket> = {}
+      for (const f of fields) {
+        const c = t.carryOver?.[f]
+        if (c && !String(t[f] ?? '').trim()) patch[f] = c.value
+      }
+      const u = revalidate({ ...t, ...patch }, allKeys)
+      if (!t.valid && u.valid) nowValid.push(u.key)
+      return u
+    })
+    setTickets(next)
+    if (nowValid.length) setSelected(prev => new Set([...Array.from(prev), ...nowValid]))
+  }
+  const applyCarry = (key: string, fields?: CarryField[]) =>
+    applyCarryTo(t => (t.key === key ? (fields ?? pendingCarry(t)) : []))
+  const applyAllCarry = () => applyCarryTo(pendingCarry)
+  const [carryOpen, setCarryOpen] = useState<string | null>(null)
 
   const validCount   = useMemo(() => tickets.filter(t => t.valid).length, [tickets])
   const invalidCount = tickets.length - validCount
@@ -254,7 +298,7 @@ function ValidateScreenInner() {
     try {
       const { data } = await api.post('/api/jira/confirm', {
         reportName,
-        tickets: chosen.map(({ problems, valid, suggestedCategory, ...rest }) => rest),
+        tickets: chosen.map(({ problems, valid, suggestedCategory, carryOver, ...rest }) => rest),
       })
       router.push(`/dashboard/${data.reportId}`)
     } catch (e: unknown) {
@@ -332,6 +376,23 @@ function ValidateScreenInner() {
               <strong>ดึงข้อมูลได้ไม่ครบ</strong> — มี ticket ตรงเงื่อนไขมากกว่า {truncation.limit.toLocaleString()} รายการ ระบบดึงมาแค่ {truncation.limit.toLocaleString()} รายการแรก
               กลับไปแคบ JQL ให้เล็กลง (เช่น ช่วงวันที่สั้นลง) เพื่อให้ได้ข้อมูลครบ
             </p>
+          </div>
+        )}
+
+        {carryFieldCount > 0 && (
+          <div className="rounded-xl border border-indigo-200 dark:border-indigo-900/50 bg-indigo-50 dark:bg-indigo-950/20 px-5 py-3 flex items-center justify-between gap-3 flex-wrap">
+            <p className="text-sm text-indigo-900 dark:text-indigo-200">
+              <strong>{carryTicketCount} tickets</strong> เคยกรอกข้อมูลไว้ใน report ก่อนหน้า ({carryFieldCount} ช่อง) แต่ใน Jira ยังว่าง
+              <span className="block text-xs text-indigo-700/80 dark:text-indigo-300/70 mt-0.5">
+                กดเติมเพื่อใช้ค่าเดิม (ค่าจะถูกบันทึกลง report ใหม่นี้ — ไม่ได้เขียนกลับเข้า Jira) · ดูทีละรายการได้จากปุ่ม ↺ ในตาราง
+              </span>
+            </p>
+            <button
+              onClick={applyAllCarry}
+              className="rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-700 transition-colors whitespace-nowrap"
+            >
+              เติมจาก report ก่อนหน้าทั้งหมด
+            </button>
           </div>
         )}
 
@@ -415,8 +476,8 @@ function ValidateScreenInner() {
               </thead>
               <tbody>
                 {filteredTickets.map(t => (
+                  <Fragment key={t.key}>
                   <tr
-                    key={t.key}
                     className={`border-b border-slate-100 dark:border-slate-700/50 transition-colors align-top ${
                       !t.valid ? 'bg-orange-50/40 dark:bg-orange-950/10' : ''
                     }`}
@@ -429,7 +490,20 @@ function ValidateScreenInner() {
                         className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
                       />
                     </td>
-                    <td className="py-2 px-3 font-medium text-blue-600 dark:text-blue-400 whitespace-nowrap">{t.key}</td>
+                    <td className="py-2 px-3 font-medium text-blue-600 dark:text-blue-400 whitespace-nowrap">
+                      {t.key}
+                      {pendingCarry(t).length > 0 && (
+                        <>
+                          <button
+                            onClick={() => setCarryOpen(o => (o === t.key ? null : t.key))}
+                            title="มีค่าจาก report ก่อนหน้า"
+                            className="ml-1 rounded-full bg-indigo-100 dark:bg-indigo-900/40 px-1.5 text-[10px] font-semibold text-indigo-700 dark:text-indigo-300 hover:bg-indigo-200"
+                          >
+                            ↺ {pendingCarry(t).length}
+                          </button>
+                        </>
+                      )}
+                    </td>
                     <td className="py-2 px-3 text-slate-700 dark:text-slate-200">
                       <EditableText value={t.summary ?? ''} onSave={v => editField(t.key, 'summary', v)} placeholder="ไม่มี summary" />
                     </td>
@@ -476,6 +550,38 @@ function ValidateScreenInner() {
                       )}
                     </td>
                   </tr>
+                  {carryOpen === t.key && pendingCarry(t).length > 0 && (
+                    <tr className="bg-indigo-50/60 dark:bg-indigo-950/20 border-b border-indigo-100 dark:border-indigo-900/40">
+                      <td></td>
+                      <td colSpan={8} className="py-3 px-3">
+                        <p className="text-xs font-semibold text-slate-700 dark:text-slate-200 mb-2">ค่าจาก report ก่อนหน้าของ {t.key}</p>
+                        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                          {pendingCarry(t).map(f => (
+                            <div key={f} className="rounded-lg border border-indigo-200 dark:border-indigo-900/50 bg-white dark:bg-slate-800 p-2.5 text-xs">
+                              <div className="flex items-start justify-between gap-2">
+                                <div className="min-w-0">
+                                  <p className="font-medium text-slate-500 dark:text-slate-400">{CARRY_LABEL[f]}</p>
+                                  <p className="text-slate-700 dark:text-slate-200 break-words line-clamp-3">{t.carryOver![f]!.value}</p>
+                                  <p className="text-[10px] text-slate-400 mt-0.5">จาก &quot;{t.carryOver![f]!.reportName}&quot;</p>
+                                </div>
+                                <button
+                                  onClick={() => applyCarry(t.key, [f])}
+                                  className="shrink-0 rounded-md border border-indigo-300 dark:border-indigo-700 px-2 py-0.5 text-[11px] text-indigo-700 dark:text-indigo-300 hover:bg-indigo-50 dark:hover:bg-indigo-900/30"
+                                >
+                                  ใช้ค่านี้
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                        <div className="mt-2 flex gap-4">
+                          <button onClick={() => { applyCarry(t.key); setCarryOpen(null) }} className="text-[11px] font-medium text-indigo-600 dark:text-indigo-400 hover:underline">ใช้ทั้งหมดของใบนี้</button>
+                          <button onClick={() => setCarryOpen(null)} className="text-[11px] text-slate-500 hover:underline">ปิด</button>
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                  </Fragment>
                 ))}
                 {!filteredTickets.length && (
                   <tr><td colSpan={9} className="py-10 text-center text-sm text-slate-400">ไม่พบข้อมูลที่ตรงกับตัวกรอง</td></tr>

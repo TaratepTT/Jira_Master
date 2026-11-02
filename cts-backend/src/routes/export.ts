@@ -34,6 +34,10 @@ router.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
       'System':                     t.system,
       'Recurring Issue Category':   t.recurringCategory,
       'Standalone Category':        t.standaloneCategory,
+      'Assignee':                   t.assignee ?? '',
+      'Priority':                   t.priority ?? '',
+      'Created':                    t.ticketCreatedAt ? t.ticketCreatedAt.toISOString() : '',
+      'Resolved':                   t.resolvedAt ? t.resolvedAt.toISOString() : '',
     }))
 
     const csv = Papa.unparse(rows)

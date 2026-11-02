@@ -2,6 +2,7 @@ import { Router, Request, Response, NextFunction } from 'express'
 import { fetchJiraIssues, fetchJiraIssuesWithMeta, MAX_SYNC_ISSUES, testJiraConnection, type JiraIssue } from '../lib/jira.js'
 import prisma from '../lib/prisma.js'
 import { recordAudit } from '../lib/audit.js'
+import { findCarryOver } from '../lib/carryover.js'
 import type { AuthedRequest } from '../middleware/requireAuth.js'
 
 const router = Router()
@@ -13,6 +14,13 @@ function normaliseSystem(raw: string): string {
   if (u.includes('VMP')) return 'VMP'
   if (u.includes('TMS'))  return 'CP TMS'
   return raw
+}
+
+// Jira date string -> Date, or null for empty / unparseable values (never "Invalid Date")
+function toDate(v: string | null | undefined): Date | null {
+  if (!v) return null
+  const d = new Date(v)
+  return Number.isNaN(d.getTime()) ? null : d
 }
 
 // A ticket "fails validation" if any required field for the dashboard is empty
@@ -103,11 +111,25 @@ router.post('/preview-all', async (req: Request, res: Response, next: NextFuncti
         assignee:           i.assignee,
         priority:           i.priority,
         ticketCreatedAt:    i.created || null,
+        resolvedAt:         i.resolved || null,
         problems,
         valid: problems.length === 0,
         // Only suggest when Type of Issue is genuinely empty
         suggestedCategory: !i.typeOfIssue ? suggestCategory(i.summary) : null,
       }
+    })
+
+    // Values filled in earlier reports for fields that are empty in Jira (suggestions only).
+    // A failure here must never block the sync, so it degrades to "no suggestions".
+    let carry = new Map<string, Record<string, unknown>>()
+    try {
+      carry = await findCarryOver(rows)
+    } catch (err) {
+      console.error('[carry-over] lookup failed:', err instanceof Error ? err.message : err)
+    }
+    const rowsOut = rows.map(r => {
+      const c = carry.get(r.key)
+      return c ? { ...r, carryOver: c } : r
     })
 
     const validCount = rows.filter(r => r.valid).length
@@ -118,7 +140,8 @@ router.post('/preview-all', async (req: Request, res: Response, next: NextFuncti
       invalidCount: rows.length - validCount,
       truncated,
       limit: MAX_SYNC_ISSUES,
-      tickets: rows,
+      carryOverCount: carry.size,
+      tickets: rowsOut,
     })
   } catch (err) {
     next(err)
@@ -136,7 +159,7 @@ router.post('/confirm', async (req: Request, res: Response, next: NextFunction) 
         key: string; system: string; status: string; businessUnit: string
         typeOfIssue: string; recurringCategory?: string; standaloneCategory?: string
         summary?: string; rootCause?: string; resolution?: string; deployDate?: string
-        assignee?: string; priority?: string; ticketCreatedAt?: string | null
+        assignee?: string; priority?: string; ticketCreatedAt?: string | null; resolvedAt?: string | null
       }>
     }
 
@@ -167,7 +190,8 @@ router.post('/confirm', async (req: Request, res: Response, next: NextFunction) 
               deployDate:         t.deployDate || null,
               assignee:           t.assignee || null,
               priority:           t.priority || null,
-              ticketCreatedAt:    t.ticketCreatedAt ? new Date(t.ticketCreatedAt) : null,
+              ticketCreatedAt:    toDate(t.ticketCreatedAt),
+              resolvedAt:         toDate(t.resolvedAt),
             })),
           },
         },
@@ -228,7 +252,8 @@ router.post('/sync', async (req: Request, res: Response, next: NextFunction) => 
               deployDate:         i.deployDate || null,
               assignee:           i.assignee || null,
               priority:           i.priority || null,
-              ticketCreatedAt:    i.created ? new Date(i.created) : null,
+              ticketCreatedAt:    toDate(i.created),
+              resolvedAt:         toDate(i.resolved),
             })),
           },
         },

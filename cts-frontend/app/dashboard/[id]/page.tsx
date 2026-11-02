@@ -3,14 +3,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
-import api from '@/lib/api'
-import {
-  updateTicket, getTicketTransitions, getTicketCustomFields,
-  type BulkUpdateResponse, type TransitionRequirement,
-  type ExtraFieldMeta, type ExtraFieldInput, type TicketUpdateInput,
-} from '@/lib/api'
-import { getTicketActivity, addTicketComment, type TicketComment, type TicketChangelogEntry } from '@/lib/api'
-import { getTicketAttachments, downloadTicketAttachment, fetchAttachmentBlobUrl, fetchAttachmentText, type TicketAttachment } from '@/lib/api'
+import api, { refreshReportFromJira, type BulkUpdateResponse } from '@/lib/api'
+import { useUrlFilters } from '@/lib/useUrlFilters'
 import ThemeToggle from '@/components/theme/ThemeToggle'
 import ExpandableKeys from '@/components/dashboard/ExpandableKeys'
 import LogoutButton from '@/components/auth/LogoutButton'
@@ -18,1165 +12,56 @@ import { useAuth } from '@/components/auth/AuthContext'
 import RootCauseInsights from '@/components/dashboard/RootCauseInsights'
 import BulkEditModal from '@/components/dashboard/BulkEditModal'
 import TrendChart from '@/components/dashboard/TrendChart'
+import AgingPanel from '@/components/dashboard/AgingPanel'
+import FlowPanel from '@/components/dashboard/FlowPanel'
+import ProgressBar from '@/components/dashboard/ProgressBar'
+import MultiSelectFilter from '@/components/dashboard/MultiSelectFilter'
+import SortableHeader from '@/components/dashboard/SortableHeader'
+import FilteredInsights from '@/components/dashboard/FilteredInsights'
+import TicketDetailModal, { type TicketNav } from '@/components/dashboard/TicketDetailModal'
+import type { ReportData, SortDir, SortKey, TicketDetail } from '@/components/dashboard/types'
+import {
+  TYPE_OF_ISSUE_OPTIONS, formatDate, isIncomplete, jiraBrowseUrl, pct, statusBadge,
+} from '@/components/dashboard/utils'
 
-// ── Types ─────────────────────────────────────────────────────
-interface FreqRow { rank: number; category: string; count: number; pct: string; keys: string[] }
-interface BuTop { name: string; count: number }
-interface L3Ticket { key: string; bu: string; status: string; summary?: string }
-interface TicketDetail {
-  key: string
-  system: string
-  status: string
-  businessUnit: string
-  typeOfIssue: string
-  recurringCategory: string
-  standaloneCategory: string
-  summary?: string
-  rootCause?: string
-  resolution?: string
-  deployDate?: string
-  assignee?: string
-  priority?: string
-  ticketCreatedAt?: string | null
-}
-interface Aggregations {
-  systemCount: Record<string, number>
-  statusCount: Record<string, number>
-  buCount: Record<string, number>
-  issueTypeCount: Record<string, number>
-  frequencyTable: FreqRow[]
-  top5Bu: BuTop[]
-  top3Cat: FreqRow[]
-  l3Tickets: L3Ticket[]
-  topAssignees: Array<{ name: string; count: number }>
-  priorityCount: Record<string, number>
-}
-interface ReportData {
-  id: string; name: string; totalTickets: number; createdAt: string
-  tickets: TicketDetail[]
-  aggregations: Aggregations
-}
+// The dashboard of one report. Sub-components live in components/dashboard/*:
+//   TicketDetailModal (edit + sync to Jira) · TicketActivityPanel (comments/history/files)
+//   AgingPanel · FlowPanel (created vs resolved) · FilteredInsights · filters & table headers
 
-type SortKey = 'key' | 'summary' | 'businessUnit' | 'status' | 'typeOfIssue' | 'rootCause' | 'resolution' | 'deployDate'
-type SortDir = 'asc' | 'desc'
+const SORT_KEYS: SortKey[] = ['key', 'summary', 'businessUnit', 'status', 'typeOfIssue', 'rootCause', 'resolution', 'deployDate']
 
-// ── Helpers ───────────────────────────────────────────────────
-function pct(n: number, total: number) { return total ? Math.round(n / total * 100) : 0 }
-const STATUS_COLOR: Record<string, string> = {
-  closed: 'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-400',
-  'l3-investigate': 'bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-400',
-  default: 'bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300',
-}
-function statusBadge(s: string) {
-  const k = s.toLowerCase().replace(/\s+/g, '-')
-  return STATUS_COLOR[k] ?? (k.includes('l3') || k.includes('invest') ? STATUS_COLOR['l3-investigate'] : STATUS_COLOR.default)
-}
-function formatDate(d?: string) {
-  if (!d) return ''
-  const date = new Date(d)
-  if (isNaN(date.getTime())) return d
-  return date.toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: 'numeric' })
-}
-// "2026-09-01" or "2026-09-01T10:00:00.000+0700" -> "2026-09-01" (value for <input type="date">)
-function toDateInput(d?: string | null) {
-  const m = /^(\d{4}-\d{2}-\d{2})/.exec(d ?? '')
-  return m ? m[1] : ''
-}
-function isClosedStatus(s: string) {
-  return s.toLowerCase().includes('closed') || s.toLowerCase().includes('done')
-}
-function isL3Status(s: string) {
-  return s.toLowerCase().includes('l3') || s.toLowerCase().includes('investigate')
-}
+// Sort the Issue Detail table. Empty values always go last; Deploy Date sorts by real date.
+function sortTickets(list: TicketDetail[], sortKey: SortKey | null, sortDir: SortDir): TicketDetail[] {
+  if (!sortKey) return list
 
-// ── Sub-components ────────────────────────────────────────────
-function ProgressBar({ label, count, total, color = 'bg-blue-500' }: { label: string; count: number; total: number; color?: string }) {
-  const p = pct(count, total)
-  return (
-    <div className="mb-3">
-      <div className="flex justify-between text-xs text-slate-600 dark:text-slate-400 mb-1">
-        <span>{label}</span><span className="font-medium">{count} · {p}%</span>
-      </div>
-      <div className="h-2 rounded-full bg-slate-100 dark:bg-slate-700 overflow-hidden">
-        <div className={`h-full rounded-full ${color} transition-all`} style={{ width: `${p}%` }} />
-      </div>
-    </div>
-  )
-}
+  const sorted = [...list].sort((a, b) => {
+    let valA: string = ''
+    let valB: string = ''
 
-// ── Multi-select dropdown ──────────────────────────────────────
-interface MultiSelectProps {
-  label: string
-  options: { value: string; count: number }[]
-  selected: string[]
-  onChange: (vals: string[]) => void
-}
-function MultiSelectFilter({ label, options, selected, onChange }: MultiSelectProps) {
-  const [open, setOpen] = useState(false)
-  const ref = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    const onClickOutside = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
-    }
-    document.addEventListener('mousedown', onClickOutside)
-    return () => document.removeEventListener('mousedown', onClickOutside)
-  }, [])
-
-  const toggle = (val: string) => {
-    if (selected.includes(val)) onChange(selected.filter(v => v !== val))
-    else onChange([...selected, val])
-  }
-
-  return (
-    <div className="relative" ref={ref}>
-      <button
-        onClick={() => setOpen(o => !o)}
-        className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
-          selected.length
-            ? 'border-blue-300 bg-blue-50 text-blue-700 dark:border-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
-            : 'border-slate-300 bg-white text-slate-600 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700'
-        }`}
-      >
-        {label}
-        {selected.length > 0 && (
-          <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-blue-600 px-1 text-[10px] font-semibold text-white">
-            {selected.length}
-          </span>
-        )}
-        <svg className={`h-3 w-3 transition-transform ${open ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
-        </svg>
-      </button>
-
-      {open && (
-        <div className="absolute z-20 mt-1.5 w-64 rounded-xl border border-slate-200 bg-white p-2 shadow-lg dark:border-slate-700 dark:bg-slate-800">
-          {selected.length > 0 && (
-            <button
-              onClick={() => onChange([])}
-              className="mb-1 w-full rounded-lg px-2 py-1.5 text-left text-xs text-blue-600 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-900/30 transition-colors"
-            >
-              ล้างตัวกรองทั้งหมด
-            </button>
-          )}
-          <div className="max-h-64 overflow-y-auto">
-            {options.map(opt => (
-              <label
-                key={opt.value}
-                className="flex items-center justify-between gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50 dark:hover:bg-slate-700 cursor-pointer transition-colors"
-              >
-                <span className="flex items-center gap-2 min-w-0">
-                  <input
-                    type="checkbox"
-                    checked={selected.includes(opt.value)}
-                    onChange={() => toggle(opt.value)}
-                    className="h-3.5 w-3.5 rounded border-slate-300 text-blue-600 focus:ring-blue-500 flex-shrink-0"
-                  />
-                  <span className="text-xs text-slate-700 dark:text-slate-200 truncate">{opt.value}</span>
-                </span>
-                <span className="text-xs text-slate-400 flex-shrink-0">{opt.count}</span>
-              </label>
-            ))}
-            {!options.length && (
-              <p className="px-2 py-3 text-xs text-slate-400 text-center">ไม่มีตัวเลือก</p>
-            )}
-          </div>
-        </div>
-      )}
-    </div>
-  )
-}
-
-// ── Sortable column header ─────────────────────────────────────
-function SortableHeader({
-  label, sortKey, activeKey, dir, onSort, onResizeStart,
-}: {
-  label: string
-  sortKey: SortKey
-  activeKey: SortKey | null
-  dir: SortDir
-  onSort: (key: SortKey) => void
-  onResizeStart?: (e: React.MouseEvent) => void
-}) {
-  const isActive = activeKey === sortKey
-  return (
-    <th
-      onClick={() => onSort(sortKey)}
-      className="relative text-left py-2 px-3 text-xs font-medium text-slate-500 dark:text-slate-400 cursor-pointer select-none hover:text-slate-700 dark:hover:text-slate-200 transition-colors"
-    >
-      <span className="inline-flex items-center gap-1">
-        {label}
-        <span className="flex flex-col -space-y-1">
-          <svg
-            className={`h-2.5 w-2.5 ${isActive && dir === 'asc' ? 'text-blue-600 dark:text-blue-400' : 'text-slate-300 dark:text-slate-600'}`}
-            fill="currentColor" viewBox="0 0 20 20"
-          >
-            <path d="M10 5l5 6H5l5-6z" />
-          </svg>
-          <svg
-            className={`h-2.5 w-2.5 ${isActive && dir === 'desc' ? 'text-blue-600 dark:text-blue-400' : 'text-slate-300 dark:text-slate-600'}`}
-            fill="currentColor" viewBox="0 0 20 20"
-          >
-            <path d="M10 15l-5-6h10l-5 6z" />
-          </svg>
-        </span>
-      </span>
-      {onResizeStart && (
-        <div
-          onMouseDown={onResizeStart}
-          onClick={(e) => e.stopPropagation()}
-          className="absolute top-0 right-0 h-full w-2 cursor-col-resize hover:bg-blue-400/50 active:bg-blue-500/70 z-10"
-        />
-      )}
-    </th>
-  )
-}
-
-// ── Filtered Insights panel ────────────────────────────────────
-function FilteredInsights({ tickets }: { tickets: TicketDetail[] }) {
-  const total = tickets.length
-  if (!total) return null
-
-  const closedN    = tickets.filter(t => isClosedStatus(t.status)).length
-  const l3N        = tickets.filter(t => isL3Status(t.status)).length
-  const deployedN  = tickets.filter(t => !!t.deployDate).length
-
-  const statusCounts: Record<string, number> = {}
-  const buCounts: Record<string, number> = {}
-  tickets.forEach(t => {
-    const s = t.status || 'ไม่ระบุ'
-    const b = t.businessUnit || 'ไม่ระบุ'
-    statusCounts[s] = (statusCounts[s] ?? 0) + 1
-    buCounts[b] = (buCounts[b] ?? 0) + 1
-  })
-  const statusEntries = Object.entries(statusCounts).sort((a, b) => b[1] - a[1])
-  const buEntries = Object.entries(buCounts).sort((a, b) => b[1] - a[1]).slice(0, 8)
-
-  return (
-    <div className="mb-5 rounded-2xl border border-blue-100 dark:border-blue-900/50 bg-blue-50/40 dark:bg-blue-950/20 p-5 space-y-5">
-      <div className="flex items-center gap-2">
-        <svg className="h-4 w-4 text-blue-500 dark:text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 3v18h18M18.7 8l-5.1 5.1-2.8-2.8L7 14" />
-        </svg>
-        <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200">ภาพรวมของข้อมูลที่กรองอยู่</h3>
-      </div>
-
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <div className="rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 p-3">
-          <p className="text-xl font-semibold text-slate-800 dark:text-slate-100">{total}</p>
-          <p className="text-xs text-slate-400 mt-0.5">Tickets ที่กรองได้</p>
-        </div>
-        <div className="rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 p-3">
-          <p className="text-xl font-semibold text-green-600 dark:text-green-400">{pct(closedN, total)}%</p>
-          <p className="text-xs text-slate-400 mt-0.5">Closure rate ({closedN})</p>
-        </div>
-        <div className="rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 p-3">
-          <p className={`text-xl font-semibold ${l3N ? 'text-orange-600 dark:text-orange-400' : 'text-slate-800 dark:text-slate-100'}`}>{l3N}</p>
-          <p className="text-xs text-slate-400 mt-0.5">L3 escalation</p>
-        </div>
-        <div className="rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 p-3">
-          <p className="text-xl font-semibold text-indigo-600 dark:text-indigo-400">{pct(deployedN, total)}%</p>
-          <p className="text-xs text-slate-400 mt-0.5">Deployed ({deployedN}/{total})</p>
-        </div>
-      </div>
-
-      <div className="grid gap-4 md:grid-cols-2">
-        <div className="rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 p-4">
-          <p className="text-xs font-semibold text-slate-600 dark:text-slate-300 mb-3">Status ในกลุ่มที่กรอง</p>
-          {statusEntries.map(([s, c]) => (
-            <div key={s} className="mb-2.5 last:mb-0">
-              <div className="flex justify-between items-center text-xs text-slate-600 dark:text-slate-400 mb-1">
-                <span className={`inline-block px-2 py-0.5 rounded-full text-[11px] font-medium ${statusBadge(s)}`}>{s}</span>
-                <span className="font-medium">{c} · {pct(c, total)}%</span>
-              </div>
-              <div className="h-1.5 rounded-full bg-slate-100 dark:bg-slate-700 overflow-hidden">
-                <div className="h-full rounded-full bg-slate-400" style={{ width: `${pct(c, total)}%` }} />
-              </div>
-            </div>
-          ))}
-        </div>
-
-        <div className="rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 p-4">
-          <p className="text-xs font-semibold text-slate-600 dark:text-slate-300 mb-3">Business Unit ในกลุ่มที่กรอง</p>
-          {buEntries.map(([b, c]) => (
-            <div key={b} className="mb-2.5 last:mb-0">
-              <div className="flex justify-between items-center text-xs text-slate-600 dark:text-slate-400 mb-1">
-                <span className="truncate max-w-[160px]">{b}</span>
-                <span className="font-medium flex-shrink-0">{c} · {pct(c, total)}%</span>
-              </div>
-              <div className="h-1.5 rounded-full bg-slate-100 dark:bg-slate-700 overflow-hidden">
-                <div className="h-full rounded-full bg-purple-400" style={{ width: `${pct(c, total)}%` }} />
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      <div className="rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 p-4">
-        <div className="flex justify-between items-center text-xs text-slate-600 dark:text-slate-400 mb-1.5">
-          <span className="font-medium">Deploy Progress</span>
-          <span>{deployedN} deployed · {total - deployedN} pending</span>
-        </div>
-        <div className="h-2.5 rounded-full bg-slate-100 dark:bg-slate-700 overflow-hidden flex">
-          <div className="h-full bg-indigo-500" style={{ width: `${pct(deployedN, total)}%` }} />
-        </div>
-      </div>
-    </div>
-  )
-}
-
-// ── Ticket Detail Modal (editable — syncs back to Jira) ────────
-// ── Ticket Activity Panel (Comments + Changelog + Files) ────────
-function formatActivityDate(iso: string): string {
-  const d = new Date(iso)
-  if (isNaN(d.getTime())) return iso
-  return d.toLocaleString('th-TH', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
-}
-
-function formatFileSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
-}
-
-function attachmentIcon(mimeType: string): string {
-  if (mimeType.startsWith('image/')) return '🖼️'
-  if (mimeType.includes('pdf')) return '📄'
-  if (mimeType.includes('sheet') || mimeType.includes('excel')) return '📊'
-  if (mimeType.includes('word') || mimeType.includes('document')) return '📝'
-  return '📎'
-}
-
-function getPreviewType(mimeType: string, filename: string): 'image' | 'pdf' | 'text' | 'office' | 'none' {
-  if (mimeType.startsWith('image/')) return 'image'
-  if (mimeType.includes('pdf')) return 'pdf'
-  const ext = filename.split('.').pop()?.toLowerCase() ?? ''
-  if (['txt', 'csv', 'json', 'xml', 'log', 'md'].includes(ext)) return 'text'
-  if (['xlsx', 'xls', 'docx', 'doc', 'pptx', 'ppt'].includes(ext)) return 'office'
-  return 'none'
-}
-
-function TicketActivityPanel({ reportId, ticketKey }: { reportId: string; ticketKey: string }) {
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
-  const [comments, setComments] = useState<TicketComment[]>([])
-  const [changelog, setChangelog] = useState<TicketChangelogEntry[]>([])
-  const [attachments, setAttachments] = useState<TicketAttachment[]>([])
-  const { canEdit } = useAuth()
-  const [tab, setTab] = useState<'comments' | 'changelog' | 'attachments'>('comments')
-  const [newComment, setNewComment] = useState('')
-  const [posting, setPosting] = useState(false)
-  const [downloadingId, setDownloadingId] = useState<string | null>(null)
-  // ── Preview state ─────────────────────────────────────────────
-  const [previewId, setPreviewId] = useState<string | null>(null)
-  const [previewBlobUrl, setPreviewBlobUrl] = useState<string | null>(null)
-  const [previewText, setPreviewText] = useState<string | null>(null)
-  const [previewLoading, setPreviewLoading] = useState(false)
-  const prevBlobRef = useRef<string | null>(null)
-  // ── Lightbox state ────────────────────────────────────────────
-  const [lightboxUrl, setLightboxUrl] = useState<string | null>(null)
-
-  useEffect(() => {
-    setLoading(true)
-    setError('')
-    Promise.all([
-      getTicketActivity(reportId, ticketKey),
-      getTicketAttachments(reportId, ticketKey),
-    ])
-      .then(([activity, attach]) => {
-        setComments(activity.comments)
-        setChangelog(activity.changelog)
-        setAttachments(attach.attachments)
-      })
-      .catch(() => setError('โหลดประวัติไม่สำเร็จ'))
-      .finally(() => setLoading(false))
-  }, [reportId, ticketKey])
-
-  // Revoke blob URL on unmount to avoid memory leaks
-  useEffect(() => {
-    return () => {
-      if (prevBlobRef.current) window.URL.revokeObjectURL(prevBlobRef.current)
-    }
-  }, [])
-
-  const handlePostComment = async () => {
-    if (!newComment.trim()) return
-    setPosting(true)
-    try {
-      const result = await addTicketComment(reportId, ticketKey, newComment.trim())
-      setComments(result.comments)
-      setNewComment('')
-    } catch {
-      setError('เพิ่ม comment ไม่สำเร็จ')
-    } finally {
-      setPosting(false)
-    }
-  }
-
-  const handleDownload = async (attachment: TicketAttachment) => {
-    setDownloadingId(attachment.id)
-    try {
-      await downloadTicketAttachment(reportId, ticketKey, attachment)
-    } catch {
-      setError('ดาวน์โหลดไฟล์ไม่สำเร็จ')
-    } finally {
-      setDownloadingId(null)
-    }
-  }
-
-  const handleTogglePreview = async (a: TicketAttachment) => {
-    // Close preview if already open
-    if (previewId === a.id) {
-      setPreviewId(null)
-      setPreviewBlobUrl(null)
-      setPreviewText(null)
-      if (prevBlobRef.current) {
-        window.URL.revokeObjectURL(prevBlobRef.current)
-        prevBlobRef.current = null
-      }
-      return
+    if (sortKey === 'deployDate') {
+      // Sort by actual date value; empty dates go last regardless of direction
+      const dA = a.deployDate ? new Date(a.deployDate).getTime() : null
+      const dB = b.deployDate ? new Date(b.deployDate).getTime() : null
+      if (dA === null && dB === null) return 0
+      if (dA === null) return 1
+      if (dB === null) return -1
+      return sortDir === 'asc' ? dA - dB : dB - dA
     }
 
-    setPreviewId(a.id)
-    setPreviewBlobUrl(null)
-    setPreviewText(null)
-    setPreviewLoading(true)
+    valA = (a[sortKey] ?? '').toString().toLowerCase()
+    valB = (b[sortKey] ?? '').toString().toLowerCase()
 
-    try {
-      const type = getPreviewType(a.mimeType, a.filename)
-      if (type === 'text') {
-        const text = await fetchAttachmentText(reportId, ticketKey, a.id)
-        setPreviewText(text)
-      } else if (type === 'image' || type === 'pdf') {
-        const url = await fetchAttachmentBlobUrl(reportId, ticketKey, a.id)
-        if (prevBlobRef.current) window.URL.revokeObjectURL(prevBlobRef.current)
-        prevBlobRef.current = url
-        setPreviewBlobUrl(url)
-      } else if (type === 'office') {
-        // Office files require a public URL for external viewers — fall back to download
-        setPreviewText('__office__')
-      } else {
-        // Unknown type — just download
-        await handleDownload(a)
-        setPreviewId(null)
-      }
-    } catch {
-      setError('โหลด preview ไม่สำเร็จ')
-      setPreviewId(null)
-    } finally {
-      setPreviewLoading(false)
-    }
-  }
+    if (!valA && valB) return 1
+    if (valA && !valB) return -1
 
-  const renderPreview = (a: TicketAttachment) => {
-    if (previewId !== a.id) return null
-    const type = getPreviewType(a.mimeType, a.filename)
-
-    return (
-      <div className="mt-2 rounded-lg overflow-hidden border border-slate-200 dark:border-slate-600 bg-slate-50 dark:bg-slate-900">
-        {previewLoading ? (
-          <div className="flex items-center justify-center h-40">
-            <svg className="h-5 w-5 animate-spin text-blue-500" fill="none" viewBox="0 0 24 24">
-              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-            </svg>
-          </div>
-        ) : type === 'image' && previewBlobUrl ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={previewBlobUrl}
-            alt={a.filename}
-            onClick={() => setLightboxUrl(previewBlobUrl)}
-            className="max-w-full max-h-96 object-contain mx-auto block p-2 cursor-zoom-in hover:opacity-90 transition-opacity"
-          />
-        ) : type === 'pdf' && previewBlobUrl ? (
-          <iframe
-            src={previewBlobUrl}
-            title={a.filename}
-            className="w-full h-96 border-0"
-          />
-        ) : type === 'text' && previewText ? (
-          <pre className="text-[11px] text-slate-700 dark:text-slate-300 p-3 overflow-auto max-h-64 whitespace-pre-wrap break-words font-mono">
-            {previewText.slice(0, 20000)}{previewText.length > 20000 ? '\n\n… (ตัดข้อความที่เกิน 20,000 ตัวอักษร)' : ''}
-          </pre>
-        ) : type === 'office' && previewText === '__office__' ? (
-          <div className="flex flex-col items-center justify-center h-36 gap-2 text-slate-400 text-xs">
-            <span className="text-3xl">{attachmentIcon(a.mimeType)}</span>
-            <p>ไม่สามารถ preview ไฟล์ Office ได้โดยตรง</p>
-            <button
-              onClick={() => handleDownload(a)}
-              disabled={downloadingId === a.id}
-              className="rounded-lg border border-slate-300 dark:border-slate-600 px-3 py-1 text-[11px] font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-600 disabled:opacity-40 transition-colors"
-            >
-              {downloadingId === a.id ? '...' : 'ดาวน์โหลดแทน'}
-            </button>
-          </div>
-        ) : null}
-      </div>
-    )
-  }
-
-  return (
-    <>
-    {/* ── Lightbox overlay ───────────────────────────────────────── */}
-    {lightboxUrl && (
-      <div
-        className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 p-4"
-        onClick={() => setLightboxUrl(null)}
-      >
-        <button
-          onClick={() => setLightboxUrl(null)}
-          className="absolute top-4 right-4 text-white/70 hover:text-white transition-colors"
-        >
-          <svg className="h-8 w-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-          </svg>
-        </button>
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src={lightboxUrl}
-          alt="preview"
-          onClick={(e) => e.stopPropagation()}
-          className="max-w-full max-h-full object-contain rounded-lg shadow-2xl"
-        />
-      </div>
-    )}
-    <div className="rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden">
-      <div className="flex border-b border-slate-200 dark:border-slate-700">
-        <button
-          onClick={() => setTab('comments')}
-          className={`flex-1 py-2 text-xs font-medium transition-colors ${
-            tab === 'comments'
-              ? 'bg-blue-50 dark:bg-blue-950/30 text-blue-700 dark:text-blue-400'
-              : 'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700/50'
-          }`}
-        >
-          Comments {comments.length > 0 && `(${comments.length})`}
-        </button>
-        <button
-          onClick={() => setTab('changelog')}
-          className={`flex-1 py-2 text-xs font-medium transition-colors ${
-            tab === 'changelog'
-              ? 'bg-blue-50 dark:bg-blue-950/30 text-blue-700 dark:text-blue-400'
-              : 'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700/50'
-          }`}
-        >
-          History {changelog.length > 0 && `(${changelog.length})`}
-        </button>
-        <button
-          onClick={() => setTab('attachments')}
-          className={`flex-1 py-2 text-xs font-medium transition-colors ${
-            tab === 'attachments'
-              ? 'bg-blue-50 dark:bg-blue-950/30 text-blue-700 dark:text-blue-400'
-              : 'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700/50'
-          }`}
-        >
-          Files {attachments.length > 0 && `(${attachments.length})`}
-        </button>
-      </div>
-
-      <div className="p-3 max-h-[32rem] overflow-y-auto space-y-3">
-        {loading ? (
-          <div className="space-y-2">
-            {[1, 2].map(i => <div key={i} className="h-10 rounded-lg bg-slate-100 dark:bg-slate-700 animate-pulse" />)}
-          </div>
-        ) : error ? (
-          <p className="text-xs text-red-500 text-center py-4">{error}</p>
-        ) : tab === 'comments' ? (
-          comments.length === 0 ? (
-            <p className="text-xs text-slate-400 text-center py-4">ยังไม่มี comment</p>
-          ) : (
-            comments.map(c => (
-              <div key={c.id} className="rounded-lg bg-slate-50 dark:bg-slate-700/50 p-2.5">
-                <div className="flex items-center justify-between mb-1">
-                  <span className="text-xs font-medium text-slate-700 dark:text-slate-200">{c.author}</span>
-                  <span className="text-[11px] text-slate-400">{formatActivityDate(c.created)}</span>
-                </div>
-                <p className="text-xs text-slate-600 dark:text-slate-300 whitespace-pre-wrap">{c.body}</p>
-              </div>
-            ))
-          )
-        ) : tab === 'changelog' ? (
-          changelog.length === 0 ? (
-            <p className="text-xs text-slate-400 text-center py-4">ไม่มีประวัติการเปลี่ยนแปลง</p>
-          ) : (
-            changelog.map(entry => (
-              <div key={entry.id} className="rounded-lg bg-slate-50 dark:bg-slate-700/50 p-2.5">
-                <div className="flex items-center justify-between mb-1">
-                  <span className="text-xs font-medium text-slate-700 dark:text-slate-200">{entry.author}</span>
-                  <span className="text-[11px] text-slate-400">{formatActivityDate(entry.created)}</span>
-                </div>
-                {entry.changes.map((c, i) => (
-                  <p key={i} className="text-xs text-slate-600 dark:text-slate-300">
-                    <span className="font-medium">{c.field}</span>: {c.from} → <span className="text-blue-600 dark:text-blue-400">{c.to}</span>
-                  </p>
-                ))}
-              </div>
-            ))
-          )
-        ) : (
-          // ── Files / Attachments tab ────────────────────────────
-          attachments.length === 0 ? (
-            <p className="text-xs text-slate-400 text-center py-4">ไม่มีไฟล์แนบ</p>
-          ) : (
-            attachments.map(a => (
-              <div key={a.id}>
-                <div className="flex items-center justify-between gap-2 rounded-lg bg-slate-50 dark:bg-slate-700/50 p-2.5">
-                  <div className="flex items-center gap-2 min-w-0">
-                    <span className="text-lg flex-shrink-0">{attachmentIcon(a.mimeType)}</span>
-                    <div className="min-w-0">
-                      <p className="text-xs font-medium text-slate-700 dark:text-slate-200 truncate">{a.filename}</p>
-                      <p className="text-[11px] text-slate-400">{formatFileSize(a.size)} · {a.author} · {formatActivityDate(a.created)}</p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-1.5 flex-shrink-0">
-                    {/* Preview toggle */}
-                    <button
-                      onClick={() => handleTogglePreview(a)}
-                      disabled={previewLoading && previewId === a.id}
-                      className={`rounded-lg border px-2 py-1 text-[11px] font-medium transition-colors disabled:opacity-40 ${
-                        previewId === a.id
-                          ? 'border-blue-400 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'
-                          : 'border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-600'
-                      }`}
-                    >
-                      {previewLoading && previewId === a.id ? '...' : previewId === a.id ? 'ปิด' : 'ดู'}
-                    </button>
-                    {/* Download */}
-                    <button
-                      onClick={() => handleDownload(a)}
-                      disabled={downloadingId === a.id}
-                      className="rounded-lg border border-slate-300 dark:border-slate-600 px-2 py-1 text-[11px] font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-600 disabled:opacity-40 transition-colors"
-                    >
-                      {downloadingId === a.id ? '...' : '⬇'}
-                    </button>
-                  </div>
-                </div>
-                {renderPreview(a)}
-              </div>
-            ))
-          )
-        )}
-      </div>
-
-      {tab === 'comments' && canEdit && (
-        <div className="border-t border-slate-200 dark:border-slate-700 p-2 flex items-center gap-2">
-          <input
-            type="text"
-            value={newComment}
-            onChange={e => setNewComment(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && handlePostComment()}
-            placeholder="เพิ่ม comment..."
-            disabled={posting}
-            className="flex-1 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 px-2.5 py-1.5 text-xs text-slate-700 dark:text-slate-200 outline-none focus:border-blue-500"
-          />
-          <button
-            onClick={handlePostComment}
-            disabled={posting || !newComment.trim()}
-            className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-40 transition-colors"
-          >
-            {posting ? '...' : 'ส่ง'}
-          </button>
-        </div>
-      )}
-    </div>
-    </>
-  )
-}
-
-
-// Kept in one place so the Dashboard edit modal and the Validate screen always
-// offer the exact same Type of Issue choices. Includes every category actually
-// seen in synced data plus a few extra ones the team uses in Jira.
-const TYPE_OF_ISSUE_OPTIONS = [
-  'Non-app issue', 'App issue', 'User request', 'Human Error', 'Data Issue',
-  'Other', 'Monitor', 'Referral', 'Bug Issue', 'Alert', 'Q&A',
-]
-
-// Draft value of one extra dropdown field while editing
-interface ExtraDraft { id: string; childId: string; ids: string[]; text: string }
-function draftFromMeta(f: ExtraFieldMeta): ExtraDraft {
-  return { id: f.current.id ?? '', childId: f.current.childId ?? '', ids: f.current.ids ?? [], text: f.current.text ?? '' }
-}
-// null = unchanged; otherwise the value to send (null inside = clear the field)
-function extraChange(f: ExtraFieldMeta, d: ExtraDraft): { send: ExtraFieldInput } | null {
-  if (f.kind === 'text') {
-    if (d.text.trim() === (f.current.text ?? '').trim()) return null
-    return { send: d.text.trim() ? { text: d.text.trim() } : null }
-  }
-  if (f.kind === 'multi-option') {
-    const cur = [...(f.current.ids ?? [])].sort().join(',')
-    const now = [...d.ids].sort().join(',')
-    if (cur === now) return null
-    return { send: d.ids.length ? { ids: d.ids } : null }
-  }
-  const curId = f.current.id ?? ''
-  const curChild = f.current.childId ?? ''
-  if (d.id === curId && (f.kind !== 'option-with-child' || d.childId === curChild)) return null
-  if (!d.id) return { send: null }
-  return { send: f.kind === 'option-with-child' && d.childId ? { id: d.id, childId: d.childId } : { id: d.id } }
-}
-
-function TicketDetailModal({
-  ticket, reportId, onClose, onUpdated,
-}: {
-  ticket: TicketDetail
-  reportId: string
-  onClose: () => void
-  onUpdated: (updated: TicketDetail) => void
-}) {
-  const { canEdit } = useAuth()
-  const [editing, setEditing] = useState(false)
-  const [saving, setSaving] = useState(false)
-  const [error, setError] = useState('')
-  const [warnings, setWarnings] = useState<string[]>([])
-  // Statuses Jira allows right now (null = not loaded yet)
-  const [allowedStatuses, setAllowedStatuses] = useState<string[] | null>(null)
-  const [statusNote, setStatusNote] = useState('')
-  const [transitionDetails, setTransitionDetails] = useState<Record<string, TransitionRequirement>>({})
-  // status -> ordered steps the app runs as a queue (e.g. Closed: Resolved → CLOSING → Closed)
-  const [queuedPaths, setQueuedPaths] = useState<Record<string, string[]>>({})
-  // The requirements (Resolution picker, extra fields) belong to the FIRST step of a queue
-  const reqKey = (st: string) => queuedPaths[st]?.[0] ?? st
-  const [transitionResolution, setTransitionResolution] = useState('')
-
-  // Action Card / Type / Task Type — loaded from Jira (options + current values), editors only
-  const [extra, setExtra] = useState<ExtraFieldMeta[] | null>(null)
-  const [extraDraft, setExtraDraft] = useState<Record<string, ExtraDraft>>({})
-  const [extraMissing, setExtraMissing] = useState<string[]>([])
-  const [extraError, setExtraError] = useState('')
-  const loadExtra = useCallback(() => {
-    if (!canEdit) return
-    getTicketCustomFields(reportId, ticket.key)
-      .then(r => {
-        setExtra(r.fields)
-        setExtraMissing(r.missing)
-        setExtraError(r.error ?? '')
-        setExtraDraft(Object.fromEntries(r.fields.map(f => [f.id, draftFromMeta(f)])))
-      })
-      .catch(() => { setExtra([]); setExtraError('ดึงข้อมูล Action Card / Type / Task Type จาก Jira ไม่สำเร็จ') })
-  }, [canEdit, reportId, ticket.key])
-  useEffect(() => { loadExtra() }, [loadExtra])
-
-  const [draft, setDraft] = useState({
-    businessUnit: ticket.businessUnit || '',
-    typeOfIssue:  ticket.typeOfIssue || '',
-    status:       ticket.status || '',
-    rootCause:    ticket.rootCause || '',
-    resolution:   ticket.resolution || '',
-    deployDate:   toDateInput(ticket.deployDate),
+    const cmp = valA.localeCompare(valB, 'th')
+    return sortDir === 'asc' ? cmp : -cmp
   })
 
-  const startEdit = () => {
-    setDraft({
-      businessUnit: ticket.businessUnit || '',
-      typeOfIssue:  ticket.typeOfIssue || '',
-      status:       ticket.status || '',
-      rootCause:    ticket.rootCause || '',
-      resolution:   ticket.resolution || '',
-      deployDate:   toDateInput(ticket.deployDate),
-    })
-    setError('')
-    setWarnings([])
-    setAllowedStatuses(null)
-    setStatusNote('')
-    setTransitionDetails({})
-    setQueuedPaths({})
-    setTransitionResolution('')
-    if (extra) setExtraDraft(Object.fromEntries(extra.map(f => [f.id, draftFromMeta(f)])))
-    setEditing(true)
-    getTicketTransitions(reportId, ticket.key)
-      .then(t => {
-        setAllowedStatuses(t.allowed)
-        setTransitionDetails(t.details ?? {})
-        setQueuedPaths(t.queued ?? {})
-        if (t.error) setStatusNote(t.error)
-        else if (t.allowed.length === 0) setStatusNote('ไม่มีสถานะอื่นที่ Jira อนุญาตให้เปลี่ยนจากสถานะนี้ (workflow หรือสิทธิ์ของบัญชี)')
-      })
-      .catch(() => {
-        setAllowedStatuses([])
-        setStatusNote('ดึงรายการสถานะที่เปลี่ยนได้ไม่สำเร็จ — เปลี่ยนสถานะไม่ได้ในตอนนี้')
-      })
-  }
-
-  const handleSave = async () => {
-    setSaving(true)
-    setError('')
-    setWarnings([])
-    try {
-      const changed: Record<string, string> = {}
-      if (draft.businessUnit !== (ticket.businessUnit || '')) changed.businessUnit = draft.businessUnit
-      if (draft.typeOfIssue  !== (ticket.typeOfIssue || ''))  changed.typeOfIssue  = draft.typeOfIssue
-      if (draft.status       !== (ticket.status || ''))       changed.status       = draft.status
-      if (draft.rootCause    !== (ticket.rootCause || ''))    changed.rootCause    = draft.rootCause
-      if (draft.resolution   !== (ticket.resolution || ''))   changed.resolution   = draft.resolution
-      if (draft.deployDate   !== toDateInput(ticket.deployDate)) changed.deployDate = draft.deployDate // '' = clear in Jira
-
-      const customChanged: Record<string, ExtraFieldInput> = {}
-      for (const f of extra ?? []) {
-        const c = extraChange(f, extraDraft[f.id] ?? draftFromMeta(f))
-        if (c) customChanged[f.id] = c.send
-      }
-
-      if (Object.keys(changed).length === 0 && Object.keys(customChanged).length === 0) {
-        setEditing(false)
-        setSaving(false)
-        return
-      }
-
-      const statusReq = changed.status ? transitionDetails[reqKey(changed.status)] : undefined
-      const payload: TicketUpdateInput = { ...changed }
-      if (Object.keys(customChanged).length > 0) payload.customFields = customChanged
-      if (statusReq?.resolutionOptions?.length) {
-        payload.transitionResolution = transitionResolution || statusReq.resolutionDefault || statusReq.resolutionOptions[0]
-      }
-      const result = await updateTicket(reportId, ticket.key, payload)
-      onUpdated({ ...ticket, ...result.ticket })
-      if (result.warnings.length > 0) setWarnings(result.warnings)
-      if (Object.keys(customChanged).length > 0) loadExtra() // refresh "current" values from Jira
-      setEditing(false)
-    } catch (e: unknown) {
-      const msg = (e as { response?: { data?: { message?: string } } })?.response?.data?.message ?? 'บันทึกไม่สำเร็จ'
-      setError(msg)
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4"
-      onClick={onClose}
-    >
-      <div
-        className="w-full max-w-lg rounded-2xl bg-white dark:bg-slate-800 p-6 shadow-xl max-h-[85vh] overflow-y-auto"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-start justify-between mb-4">
-          <div>
-            <p className="text-xs text-slate-400">Ticket</p>
-            <a
-              href={`https://ascendcommerce-support.atlassian.net/browse/${ticket.key}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-lg font-semibold text-blue-600 dark:text-blue-400 hover:underline inline-flex items-center gap-1"
-            >
-              {ticket.key}
-              <svg className="h-3.5 w-3.5 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
-              </svg>
-            </a>
-          </div>
-          <div className="flex items-center gap-2">
-            {!editing && canEdit && (
-              <button
-                onClick={startEdit}
-                className="flex items-center gap-1 rounded-lg border border-slate-300 dark:border-slate-600 px-2.5 py-1 text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors"
-              >
-                <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931z" />
-                </svg>
-                แก้ไข
-              </button>
-            )}
-            <button onClick={onClose} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200">
-              <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
-          </div>
-        </div>
-
-        <div className="space-y-4 text-sm">
-          {ticket.summary && (
-            <div>
-              <p className="text-xs font-medium text-slate-400 mb-1">Summary</p>
-              <p className="text-slate-700 dark:text-slate-200">{ticket.summary}</p>
-            </div>
-          )}
-
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <p className="text-xs font-medium text-slate-400 mb-1">Status</p>
-              {editing ? (
-                <>
-                  <select
-                    value={draft.status}
-                    onChange={e => {
-                      const st = e.target.value
-                      setDraft(d => ({ ...d, status: st }))
-                      setTransitionResolution(transitionDetails[reqKey(st)]?.resolutionDefault ?? '')
-                    }}
-                    disabled={allowedStatuses === null}
-                    className="w-full rounded-lg border border-blue-400 bg-white dark:bg-slate-700 px-2 py-1.5 text-xs text-slate-800 dark:text-slate-100 outline-none disabled:opacity-60"
-                  >
-                    {[ticket.status, ...(allowedStatuses ?? []).filter(x => x !== ticket.status)].map(st => (
-                      <option key={st} value={st}>{st === ticket.status ? `${st} (ปัจจุบัน)` : st}</option>
-                    ))}
-                    {Object.keys(queuedPaths)
-                      .filter(st => st !== ticket.status && !(allowedStatuses ?? []).includes(st))
-                      .map(st => (
-                        <option key={st} value={st}>{`${st} (ผ่านคิว ${queuedPaths[st].length} ขั้น)`}</option>
-                      ))}
-                  </select>
-                  {allowedStatuses === null && <p className="mt-1 text-[11px] text-slate-400">กำลังดึงสถานะที่เปลี่ยนได้จาก Jira...</p>}
-                  {statusNote && <p className="mt-1 text-[11px] text-orange-600 dark:text-orange-400">{statusNote}</p>}
-                  {queuedPaths[draft.status] && draft.status !== ticket.status && (
-                    <div className="mt-2 rounded-lg border border-indigo-200 dark:border-indigo-900/50 bg-indigo-50 dark:bg-indigo-950/20 px-2.5 py-2">
-                      <p className="text-[11px] font-medium text-indigo-700 dark:text-indigo-300">
-                        ระบบจะเปลี่ยนสถานะต่อเนื่องตามคิว: {[ticket.status, ...queuedPaths[draft.status]].join(' → ')}
-                      </p>
-                      <p className="mt-0.5 text-[11px] text-indigo-600/80 dark:text-indigo-300/70">
-                        แต่ละขั้นเขียนลง Jira จริงตามลำดับ ถ้าขั้นใดไม่ผ่าน (เช่น บัญชีไม่มีสิทธิ์) คิวจะหยุดที่ขั้นนั้นและ Dashboard จะแสดงสถานะที่ไปถึงจริง
-                      </p>
-                    </div>
-                  )}
-                  {draft.status !== ticket.status && transitionDetails[reqKey(draft.status)]?.resolutionOptions && (
-                    <div className="mt-2">
-                      <p className="text-[11px] font-medium text-slate-400 mb-1">Resolution ที่ Jira ต้องการสำหรับสถานะนี้</p>
-                      <select
-                        value={transitionResolution || transitionDetails[reqKey(draft.status)].resolutionDefault || ''}
-                        onChange={e => setTransitionResolution(e.target.value)}
-                        className="w-full rounded-lg border border-blue-400 bg-white dark:bg-slate-700 px-2 py-1.5 text-xs text-slate-800 dark:text-slate-100 outline-none"
-                      >
-                        {transitionDetails[reqKey(draft.status)].resolutionOptions!.map(o => <option key={o} value={o}>{o}</option>)}
-                      </select>
-                    </div>
-                  )}
-                  {draft.status !== ticket.status && transitionDetails[reqKey(draft.status)]?.needs && (
-                    <p className="mt-1.5 text-[11px] text-orange-600 dark:text-orange-400">
-                      Jira ต้องการข้อมูลเพิ่มสำหรับสถานะนี้: {transitionDetails[reqKey(draft.status)].needs!.join(', ')} — ถ้าบันทึกไม่ผ่าน ให้กรอกใน Jira โดยตรง
-                    </p>
-                  )}
-                </>
-              ) : (
-                <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${statusBadge(ticket.status)}`}>
-                  {ticket.status}
-                </span>
-              )}
-            </div>
-            <div>
-              <p className="text-xs font-medium text-slate-400 mb-1">System</p>
-              <p className="text-slate-700 dark:text-slate-200">{ticket.system}</p>
-            </div>
-            <div>
-              <p className="text-xs font-medium text-slate-400 mb-1">Business Unit</p>
-              {editing ? (
-                <input
-                  type="text"
-                  value={draft.businessUnit}
-                  onChange={e => setDraft(d => ({ ...d, businessUnit: e.target.value }))}
-                  className="w-full rounded-lg border border-blue-400 bg-white dark:bg-slate-700 px-2 py-1.5 text-xs text-slate-800 dark:text-slate-100 outline-none"
-                />
-              ) : (
-                <p className="text-slate-700 dark:text-slate-200">{ticket.businessUnit || '—'}</p>
-              )}
-            </div>
-            <div>
-              <p className="text-xs font-medium text-slate-400 mb-1">Type of Issue</p>
-              {editing ? (
-                <select
-                  value={draft.typeOfIssue}
-                  onChange={e => setDraft(d => ({ ...d, typeOfIssue: e.target.value }))}
-                  className="w-full rounded-lg border border-blue-400 bg-white dark:bg-slate-700 px-2 py-1.5 text-xs text-slate-800 dark:text-slate-100 outline-none"
-                >
-                  {TYPE_OF_ISSUE_OPTIONS.map(s => (
-                    <option key={s} value={s}>{s}</option>
-                  ))}
-                </select>
-              ) : (
-                <p className="text-slate-700 dark:text-slate-200">{ticket.typeOfIssue || '—'}</p>
-              )}
-            </div>
-            <div>
-              <p className="text-xs font-medium text-slate-400 mb-1">Deploy Date</p>
-              {editing ? (
-                <div className="flex items-center gap-1.5">
-                  <input
-                    type="date"
-                    value={draft.deployDate}
-                    onChange={e => setDraft(d => ({ ...d, deployDate: e.target.value }))}
-                    className="min-w-0 flex-1 rounded-lg border border-blue-400 bg-white dark:bg-slate-700 px-2 py-1.5 text-xs text-slate-800 dark:text-slate-100 outline-none"
-                  />
-                  {draft.deployDate && (
-                    <button
-                      type="button"
-                      onClick={() => setDraft(d => ({ ...d, deployDate: '' }))}
-                      className="shrink-0 rounded-lg border border-slate-300 dark:border-slate-600 px-2 py-1.5 text-xs text-slate-500 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors"
-                      title="ล้างวันที่ deploy"
-                    >
-                      ล้าง
-                    </button>
-                  )}
-                </div>
-              ) : (
-                <p className="text-slate-700 dark:text-slate-200">
-                  {ticket.deployDate
-                    ? <span className="inline-flex items-center gap-1 text-indigo-600 dark:text-indigo-400 font-medium">
-                        <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4.5 12.75l6 6 9-13.5" />
-                        </svg>
-                        {formatDate(ticket.deployDate)}
-                      </span>
-                    : <span className="text-slate-300 dark:text-slate-600">ยังไม่ deploy</span>}
-                </p>
-              )}
-            </div>
-          </div>
-
-          {canEdit && (extra === null || extra.length > 0 || extraMissing.length > 0 || extraError) && (
-            <div className="rounded-xl border border-slate-200 dark:border-slate-700 p-3 space-y-3">
-              <p className="text-xs font-semibold text-slate-500 dark:text-slate-400">ข้อมูลใน Jira ที่บาง workflow บังคับให้กรอกก่อนเปลี่ยนสถานะ</p>
-              {extra === null && <div className="h-10 animate-pulse rounded-lg bg-slate-100 dark:bg-slate-700" />}
-              {extraError && <p className="text-[11px] text-orange-600 dark:text-orange-400">{extraError}</p>}
-              <div className="grid grid-cols-2 gap-3">
-                {(extra ?? []).map(f => {
-                  const d = extraDraft[f.id] ?? draftFromMeta(f)
-                  const setD = (patch: Partial<ExtraDraft>) => setExtraDraft(prev => ({ ...prev, [f.id]: { ...(prev[f.id] ?? draftFromMeta(f)), ...patch } }))
-                  const selCls = 'w-full rounded-lg border border-blue-400 bg-white dark:bg-slate-700 px-2 py-1.5 text-xs text-slate-800 dark:text-slate-100 outline-none'
-                  const parent = f.options.find(o => o.id === d.id)
-                  return (
-                    <div key={f.id} className={f.kind === 'multi-option' ? 'col-span-2' : ''}>
-                      <p className="text-xs font-medium text-slate-400 mb-1">{f.name}{f.required && <span className="text-red-400"> *</span>}</p>
-                      {!editing ? (
-                        f.currentLabel
-                          ? <p className="text-sm text-slate-700 dark:text-slate-200">{f.currentLabel}</p>
-                          : <p className="text-sm text-orange-500 dark:text-orange-400">ยังไม่ได้ระบุ</p>
-                      ) : f.kind === 'text' ? (
-                        <input
-                          type="text"
-                          value={d.text}
-                          maxLength={255}
-                          onChange={e => setD({ text: e.target.value })}
-                          className={selCls}
-                        />
-                      ) : f.kind === 'multi-option' ? (
-                        <div className="flex flex-wrap gap-x-4 gap-y-1">
-                          {f.options.map(o => (
-                            <label key={o.id} className="flex items-center gap-1.5 text-xs text-slate-700 dark:text-slate-200 cursor-pointer">
-                              <input
-                                type="checkbox"
-                                checked={d.ids.includes(o.id)}
-                                onChange={e => setD({ ids: e.target.checked ? [...d.ids, o.id] : d.ids.filter(x => x !== o.id) })}
-                                className="h-3.5 w-3.5 rounded border-slate-300"
-                              />
-                              {o.value}
-                            </label>
-                          ))}
-                        </div>
-                      ) : (
-                        <div className="space-y-1.5">
-                          <select value={d.id} onChange={e => setD({ id: e.target.value, childId: '' })} className={selCls}>
-                            <option value="">— ไม่ระบุ —</option>
-                            {f.options.map(o => <option key={o.id} value={o.id}>{o.value}</option>)}
-                          </select>
-                          {f.kind === 'option-with-child' && parent?.children && parent.children.length > 0 && (
-                            <select value={d.childId} onChange={e => setD({ childId: e.target.value })} className={selCls}>
-                              <option value="">— ไม่ระบุ —</option>
-                              {parent.children.map(c => <option key={c.id} value={c.id}>{c.value}</option>)}
-                            </select>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  )
-                })}
-              </div>
-              {extraMissing.length > 0 && (
-                <p className="text-[11px] text-slate-400">ไม่พบ field ในหน้าแก้ไขของ Jira (หรือไม่รองรับชนิดนี้): {extraMissing.join(', ')}</p>
-              )}
-            </div>
-          )}
-
-          <div className="rounded-xl bg-red-50 dark:bg-red-950/30 border border-red-100 dark:border-red-900/50 p-4">
-            <p className="text-xs font-semibold text-red-700 dark:text-red-400 mb-1.5 flex items-center gap-1.5">
-              <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
-              </svg>
-              Root Cause
-            </p>
-            {editing ? (
-              <textarea
-                value={draft.rootCause}
-                onChange={e => setDraft(d => ({ ...d, rootCause: e.target.value }))}
-                rows={3}
-                className="w-full rounded-lg border border-red-300 dark:border-red-800 bg-white dark:bg-slate-700 px-2 py-1.5 text-xs text-slate-800 dark:text-slate-100 outline-none resize-none"
-              />
-            ) : (
-              <p className="text-sm text-slate-700 dark:text-slate-200 whitespace-pre-wrap">
-                {ticket.rootCause || <span className="text-slate-400 italic">ไม่มีข้อมูล</span>}
-              </p>
-            )}
-          </div>
-
-          <div className="rounded-xl bg-green-50 dark:bg-green-950/30 border border-green-100 dark:border-green-900/50 p-4">
-            <p className="text-xs font-semibold text-green-700 dark:text-green-400 mb-1.5 flex items-center gap-1.5">
-              <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-              Resolution
-            </p>
-            {editing ? (
-              <textarea
-                value={draft.resolution}
-                onChange={e => setDraft(d => ({ ...d, resolution: e.target.value }))}
-                rows={3}
-                className="w-full rounded-lg border border-green-300 dark:border-green-800 bg-white dark:bg-slate-700 px-2 py-1.5 text-xs text-slate-800 dark:text-slate-100 outline-none resize-none"
-              />
-            ) : (
-              <p className="text-sm text-slate-700 dark:text-slate-200 whitespace-pre-wrap">
-                {ticket.resolution || <span className="text-slate-400 italic">ไม่มีข้อมูล</span>}
-              </p>
-            )}
-          </div>
-
-          <TicketActivityPanel reportId={reportId} ticketKey={ticket.key} />
-
-          {error && (
-            <div className="rounded-lg bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900/50 px-3 py-2">
-              <p className="text-xs text-red-600 dark:text-red-400">{error}</p>
-            </div>
-          )}
-          {warnings.length > 0 && (
-            <div className="rounded-lg bg-orange-50 dark:bg-orange-950/30 border border-orange-200 dark:border-orange-900/50 px-3 py-2 space-y-1">
-              {warnings.map((w, i) => (
-                <p key={i} className="text-xs text-orange-600 dark:text-orange-400 whitespace-pre-line break-words">{w}</p>
-              ))}
-            </div>
-          )}
-
-          {editing && (
-            <div className="flex items-center gap-2 pt-2">
-              <button
-                onClick={handleSave}
-                disabled={saving}
-                className="flex-1 flex items-center justify-center gap-1.5 rounded-lg bg-blue-600 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
-              >
-                {saving ? (
-                  <>
-                    <svg className="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                    </svg>
-                    กำลังบันทึกและ sync ไป Jira...
-                  </>
-                ) : 'บันทึกและ Sync ไป Jira'}
-              </button>
-              <button
-                onClick={() => setEditing(false)}
-                disabled={saving}
-                className="rounded-lg border border-slate-300 dark:border-slate-600 px-4 py-2 text-sm font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 disabled:opacity-50 transition-colors"
-              >
-                ยกเลิก
-              </button>
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  )
+  return sorted
 }
 
+// ── Main dashboard ─────────────────────────────────────────────
 // ── Main dashboard ─────────────────────────────────────────────
 export default function DashboardPage() {
   const { id } = useParams<{ id: string }>()
@@ -1184,19 +69,36 @@ export default function DashboardPage() {
   const [bulkOpen, setBulkOpen] = useState(false)
   const [data, setData] = useState<ReportData | null>(null)
   const [error, setError] = useState('')
-  const [selectedTicket, setSelectedTicket] = useState<TicketDetail | null>(null)
   const [highlighted, setHighlighted] = useState<Set<string>>(new Set())
-  const [search, setSearch] = useState('')
   const [exportingCsv, setExportingCsv] = useState(false)
 
-  const [buFilter, setBuFilter]         = useState<string[]>([])
-  const [statusFilter, setStatusFilter] = useState<string[]>([])
-  const [systemFilter, setSystemFilter] = useState<string[]>([])
-  const [categoryFilter, setCategoryFilter] = useState<string[]>([])
+  // Filters, sort and the open ticket live in the address bar (shareable links) — lib/useUrlFilters.ts
+  const [filters, setFilters] = useUrlFilters()
+  const search = filters.q
+  const buFilter = filters.bu
+  const statusFilter = filters.status
+  const systemFilter = filters.system
+  const categoryFilter = filters.category
+  const incompleteOnly = filters.incomplete
+  const sortKey = (SORT_KEYS.includes(filters.sort as SortKey) ? filters.sort : null) as SortKey | null
+  const sortDir: SortDir = filters.dir
+  const setSearch = (q: string) => setFilters({ q })
+  const setBuFilter = (bu: string[]) => setFilters({ bu })
+  const setStatusFilter = (status: string[]) => setFilters({ status })
+  const setSystemFilter = (system: string[]) => setFilters({ system })
+  const setCategoryFilter = (category: string[]) => setFilters({ category })
 
-  // ── Sort state ────────────────────────────────────────────
-  const [sortKey, setSortKey] = useState<SortKey | null>(null)
-  const [sortDir, setSortDir] = useState<SortDir>('asc')
+  // Ticket modal. `fillMode` = the "ไล่กรอกข้อมูลที่ยังไม่ครบ" queue: each ticket opens in edit mode.
+  const [fillMode, setFillMode] = useState(false)
+  const selectedTicket = useMemo(
+    () => (filters.ticket && data ? data.tickets.find(t => t.key === filters.ticket) ?? null : null),
+    [filters.ticket, data],
+  )
+  const openTicket = (key: string | null) => setFilters({ ticket: key })
+
+  // ── Refresh from Jira ─────────────────────────────────────
+  const [refreshing, setRefreshing] = useState(false)
+  const [refreshMsg, setRefreshMsg] = useState<{ ok: boolean; text: string; details?: string[] } | null>(null)
 
   // ── Resizable columns for the Issue Detail table ────────────
   const [colWidths, setColWidths] = useState<Record<string, number>>({
@@ -1233,6 +135,27 @@ export default function DashboardPage() {
       .then(r => setData(r.data))
       .catch(e => setError(e?.response?.data?.message ?? 'โหลด report ไม่สำเร็จ'))
   }, [id])
+
+  const handleRefresh = useCallback(async () => {
+    if (!id || refreshing) return
+    setRefreshing(true)
+    setRefreshMsg(null)
+    try {
+      const r = await refreshReportFromJira(id)
+      const details: string[] = []
+      if (r.statusChanged) details.push(...r.statusChanges.slice(0, 8).map(c => `${c.key}: ${c.from} → ${c.to}`))
+      if (r.statusChanged > 8) details.push(`… และอีก ${r.statusChanged - 8} ticket`)
+      if (r.filledFields) details.push(`เติมช่องที่ว่างจากข้อมูลใน Jira ${r.filledFields} ช่อง`)
+      if (r.missing.length) details.push(`ไม่พบใน Jira (ถูกลบ/ย้าย): ${r.missing.slice(0, 10).join(', ')}${r.missing.length > 10 ? ' …' : ''}`)
+      setRefreshMsg({ ok: true, text: `${r.message} (ตรวจ ${r.checked} · เปลี่ยนสถานะ ${r.statusChanged})`, details })
+      const fresh = await api.get(`/api/reports/${id}`)
+      setData(fresh.data)
+    } catch (e: unknown) {
+      setRefreshMsg({ ok: false, text: (e as { response?: { data?: { message?: string } } })?.response?.data?.message ?? 'รีเฟรชจาก Jira ไม่สำเร็จ' })
+    } finally {
+      setRefreshing(false)
+    }
+  }, [id, refreshing])
 
   // After a bulk edit: reload the whole report so the charts/counters (BU, categories...)
   // match the new values. A failed reload is silent — the table was already patched locally.
@@ -1290,9 +213,12 @@ export default function DashboardPage() {
     return Object.entries(counts).sort((a, b) => b[1] - a[1]).map(([value, count]) => ({ value, count }))
   }, [data])
 
+  const incompleteCount = useMemo(() => (data ? data.tickets.filter(isIncomplete).length : 0), [data])
+
   const filteredTickets = useMemo(() => {
     if (!data) return []
     const result = data.tickets.filter(t => {
+      if (incompleteOnly && !isIncomplete(t)) return false
       const matchSearch =
         !search ||
         t.key.toLowerCase().includes(search.toLowerCase()) ||
@@ -1307,34 +233,35 @@ export default function DashboardPage() {
       return matchSearch && matchBu && matchStatus && matchSystem && matchCategory
     })
 
-    if (!sortKey) return result
+    return sortTickets(result, sortKey, sortDir)
+  }, [data, search, buFilter, statusFilter, systemFilter, categoryFilter, incompleteOnly, sortKey, sortDir])
 
-    const sorted = [...result].sort((a, b) => {
-      let valA: string = ''
-      let valB: string = ''
+  // Prev/next in the modal follows the table as it is filtered/sorted right now.
+  // In the fill-in queue the list is FROZEN when the queue starts, so a ticket that becomes
+  // complete after saving stays in the list and the counter (3 / 12) keeps making sense.
+  const [queueKeys, setQueueKeys] = useState<string[] | null>(null)
+  const navKeys = useMemo(() => queueKeys ?? filteredTickets.map(t => t.key), [queueKeys, filteredTickets])
+  const navIndex = selectedTicket ? navKeys.indexOf(selectedTicket.key) : -1
+  const ticketNav: TicketNav | undefined = navIndex >= 0 ? {
+    index: navIndex,
+    total: navKeys.length,
+    label: queueKeys ? 'ไล่กรอกข้อมูลที่ยังไม่ครบ' : incompleteOnly ? 'ข้อมูลยังไม่ครบ' : undefined,
+    onPrev: navIndex > 0 ? () => openTicket(navKeys[navIndex - 1]) : undefined,
+    onNext: navIndex < navKeys.length - 1 ? () => openTicket(navKeys[navIndex + 1]) : undefined,
+  } : undefined
 
-      if (sortKey === 'deployDate') {
-        // Sort by actual date value; empty dates go last regardless of direction
-        const dA = a.deployDate ? new Date(a.deployDate).getTime() : null
-        const dB = b.deployDate ? new Date(b.deployDate).getTime() : null
-        if (dA === null && dB === null) return 0
-        if (dA === null) return 1
-        if (dB === null) return -1
-        return sortDir === 'asc' ? dA - dB : dB - dA
-      }
-
-      valA = (a[sortKey] ?? '').toString().toLowerCase()
-      valB = (b[sortKey] ?? '').toString().toLowerCase()
-
-      if (!valA && valB) return 1
-      if (valA && !valB) return -1
-
-      const cmp = valA.localeCompare(valB, 'th')
-      return sortDir === 'asc' ? cmp : -cmp
-    })
-
-    return sorted
-  }, [data, search, buFilter, statusFilter, systemFilter, categoryFilter, sortKey, sortDir])
+  const startFillQueue = () => {
+    if (!data) return
+    const queue = sortTickets(data.tickets.filter(isIncomplete), sortKey, sortDir).map(t => t.key)
+    if (!queue.length) return
+    setFilters({ incomplete: true, q: '', bu: [], status: [], system: [], category: [], ticket: queue[0] })
+    setQueueKeys(queue)
+    setFillMode(canEdit)
+  }
+  // Closing the modal ends the queue
+  useEffect(() => {
+    if (!filters.ticket) { setQueueKeys(null); setFillMode(false) }
+  }, [filters.ticket])
 
   const toggleHighlight = (key: string) => {
     setHighlighted(prev => {
@@ -1356,23 +283,24 @@ export default function DashboardPage() {
   }
 
   const handleSort = (key: SortKey) => {
-    if (sortKey === key) {
-      setSortDir(d => (d === 'asc' ? 'desc' : 'asc'))
-    } else {
-      setSortKey(key)
-      setSortDir('asc')
-    }
+    if (sortKey === key) setFilters({ dir: sortDir === 'asc' ? 'desc' : 'asc' })
+    else setFilters({ sort: key, dir: 'asc' })
   }
 
-  const activeFilterCount = buFilter.length + statusFilter.length + systemFilter.length + categoryFilter.length
+  const activeFilterCount = buFilter.length + statusFilter.length + systemFilter.length + categoryFilter.length + (incompleteOnly ? 1 : 0)
   const hasActiveFilterOrSearch = activeFilterCount > 0 || search.trim().length > 0
 
   const clearAllFilters = () => {
-    setBuFilter([])
-    setStatusFilter([])
-    setSystemFilter([])
-    setCategoryFilter([])
-    setSearch('')
+    setFilters({ bu: [], status: [], system: [], category: [], q: '', incomplete: false })
+  }
+
+  const [copied, setCopied] = useState(false)
+  const copyViewLink = async () => {
+    try {
+      await navigator.clipboard.writeText(window.location.href)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    } catch { /* clipboard blocked — the address bar has the same link */ }
   }
 
   const handleExportCsv = async () => {
@@ -1412,6 +340,7 @@ export default function DashboardPage() {
   )
 
   const { aggregations: ag, totalTickets, name, createdAt } = data
+  const asOf = new Date(data.refreshedAt ?? createdAt)
   const closedN = ag.statusCount['Closed'] ?? 0
   const l3N = ag.l3Tickets.length
   const systemEntries = Object.entries(ag.systemCount).sort((a,b) => b[1]-a[1])
@@ -1423,19 +352,44 @@ export default function DashboardPage() {
     <div className="min-h-screen bg-slate-50 dark:bg-slate-900 transition-colors">
       {/* Header */}
       <header className="bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 sticky top-0 z-10 transition-colors">
-        <div className="mx-auto max-w-6xl px-4 sm:px-6 h-14 flex items-center justify-between">
+        <div className="mx-auto max-w-6xl px-4 sm:px-6 min-h-14 py-2 flex items-center justify-between gap-3 flex-wrap">
           <div className="flex items-center gap-3">
             <Link href="/" className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors">
               <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18"/></svg>
             </Link>
             <div>
               <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">{name}</p>
-              <p className="text-xs text-slate-400">{totalTickets} tickets · {new Date(createdAt).toLocaleDateString('th-TH', { day:'numeric', month:'short', year:'numeric' })}</p>
+              <p className="text-xs text-slate-400">
+                {totalTickets} tickets · {new Date(createdAt).toLocaleDateString('th-TH', { day:'numeric', month:'short', year:'numeric' })}
+                {data.refreshedAt && <> · รีเฟรชจาก Jira {new Date(data.refreshedAt).toLocaleString('th-TH', { day:'numeric', month:'short', hour:'2-digit', minute:'2-digit' })}</>}
+              </p>
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <ThemeToggle />
             <LogoutButton />
+            {canEdit && (
+              <button
+                onClick={handleRefresh}
+                disabled={refreshing}
+                title="ดึงสถานะ / ผู้รับผิดชอบ / วันที่ resolve ล่าสุดจาก Jira มาใส่ report นี้"
+                className="flex items-center gap-1.5 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-1.5 text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 disabled:opacity-50 transition-colors"
+              >
+                <svg className={`h-3.5 w-3.5 ${refreshing ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" />
+                </svg>
+                {refreshing ? 'กำลังรีเฟรช...' : 'รีเฟรชจาก Jira'}
+              </button>
+            )}
+            <Link
+              href={`/dashboard/${id}/summary`}
+              className="flex items-center gap-1.5 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-1.5 text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors"
+            >
+              <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6.72 13.829c-.24.03-.48.062-.72.096m.72-.096a42.415 42.415 0 0110.56 0m-10.56 0L6.34 18m10.94-4.171c.24.03.48.062.72.096m-.72-.096L17.66 18m0 0l.229 2.523a1.125 1.125 0 01-1.12 1.227H7.231c-.662 0-1.18-.568-1.12-1.227L6.34 18m11.318 0h1.091A2.25 2.25 0 0021 15.75V9.456c0-1.081-.768-2.015-1.837-2.175a48.055 48.055 0 00-1.913-.247M6.34 18H5.25A2.25 2.25 0 013 15.75V9.456c0-1.081.768-2.015 1.837-2.175a48.041 48.041 0 011.913-.247m10.5 0a48.536 48.536 0 00-10.5 0m10.5 0V3.375c0-.621-.504-1.125-1.125-1.125h-8.25c-.621 0-1.125.504-1.125 1.125v3.659M18 10.5h.008v.008H18V10.5zm-3 0h.008v.008H15V10.5z" />
+              </svg>
+              สรุปสำหรับประชุม
+            </Link>
             <Link
               href={`/compare?current=${id}`}
               className="flex items-center gap-1.5 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-1.5 text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors"
@@ -1465,6 +419,44 @@ export default function DashboardPage() {
       </header>
 
       <main className="mx-auto max-w-6xl px-4 sm:px-6 py-8 space-y-8">
+
+        {refreshMsg && (
+          <div className={`rounded-xl border px-4 py-3 ${refreshMsg.ok
+            ? 'border-green-200 dark:border-green-900/50 bg-green-50 dark:bg-green-950/20'
+            : 'border-red-200 dark:border-red-900/50 bg-red-50 dark:bg-red-950/20'}`}>
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className={`text-sm font-medium ${refreshMsg.ok ? 'text-green-800 dark:text-green-300' : 'text-red-700 dark:text-red-400'}`}>{refreshMsg.text}</p>
+                {refreshMsg.details?.map((d, i) => <p key={i} className="text-xs text-slate-600 dark:text-slate-400 mt-0.5">{d}</p>)}
+              </div>
+              <button onClick={() => setRefreshMsg(null)} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200" aria-label="ปิด">
+                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+              </button>
+            </div>
+          </div>
+        )}
+
+        {incompleteCount > 0 && (
+          <div className="rounded-xl border border-amber-200 dark:border-amber-900/50 bg-amber-50 dark:bg-amber-950/20 px-5 py-3 flex items-center justify-between gap-3 flex-wrap">
+            <p className="text-sm text-amber-900 dark:text-amber-200">
+              <strong>{incompleteCount} tickets</strong> ยังกรอกข้อมูลไม่ครบ (BU / Type of Issue / Root Cause / Resolution)
+            </p>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setFilters({ incomplete: !incompleteOnly })}
+                className="rounded-lg border border-amber-300 dark:border-amber-800 px-3 py-1.5 text-xs font-medium text-amber-800 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-900/30 transition-colors"
+              >
+                {incompleteOnly ? 'แสดงทั้งหมด' : 'ดูเฉพาะที่ไม่ครบ'}
+              </button>
+              <button
+                onClick={startFillQueue}
+                className="rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-amber-700 transition-colors"
+              >
+                {canEdit ? 'เริ่มไล่กรอกทีละใบ →' : 'ไล่ดูทีละใบ →'}
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Executive Summary */}
         <section className="rounded-2xl bg-gradient-to-br from-blue-700 to-blue-500 dark:from-blue-800 dark:to-blue-600 p-6 text-white">
@@ -1565,6 +557,10 @@ export default function DashboardPage() {
         {/* Trend Chart */}
         <TrendChart tickets={data.tickets} />
 
+        {/* Aging + Created vs Resolved */}
+        <AgingPanel tickets={data.tickets} asOf={asOf} onOpenTicket={key => openTicket(key)} />
+        <FlowPanel tickets={data.tickets} canRefresh={canEdit} onRefresh={handleRefresh} refreshing={refreshing} />
+
         {/* Frequency Table */}
         <div className="rounded-2xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 p-5">
           <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-200 mb-4">Ticket Frequency by Category</h2>
@@ -1652,12 +648,12 @@ export default function DashboardPage() {
                   {data.tickets.filter(t => highlighted.has(t.key)).map(t => (
                     <tr
                       key={t.key}
-                      onClick={() => setSelectedTicket(t)}
+                      onClick={() => openTicket(t.key)}
                       className="border-b border-slate-100 dark:border-slate-700/50 hover:bg-blue-50 dark:hover:bg-blue-950/20 cursor-pointer"
                     >
                       <td className="py-2 px-3 font-medium whitespace-nowrap">
                         <a
-                          href={`https://ascendcommerce-support.atlassian.net/browse/${t.key}`}
+                          href={jiraBrowseUrl(t.key)}
                           target="_blank"
                           rel="noopener noreferrer"
                           onClick={(e) => e.stopPropagation()}
@@ -1709,6 +705,16 @@ export default function DashboardPage() {
             <MultiSelectFilter label="Status" options={statusOptions} selected={statusFilter} onChange={setStatusFilter} />
             <MultiSelectFilter label="System" options={systemOptions} selected={systemFilter} onChange={setSystemFilter} />
             <MultiSelectFilter label="Category" options={categoryOptions} selected={categoryFilter} onChange={setCategoryFilter} />
+            <button
+              onClick={() => setFilters({ incomplete: !incompleteOnly })}
+              className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
+                incompleteOnly
+                  ? 'border-amber-300 bg-amber-50 text-amber-800 dark:border-amber-800 dark:bg-amber-900/30 dark:text-amber-300'
+                  : 'border-slate-300 bg-white text-slate-600 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700'
+              }`}
+            >
+              ข้อมูลยังไม่ครบ ({incompleteCount})
+            </button>
             {activeFilterCount > 0 && (
               <button
                 onClick={clearAllFilters}
@@ -1720,8 +726,15 @@ export default function DashboardPage() {
                 ล้างตัวกรอง ({activeFilterCount})
               </button>
             )}
-            <span className="ml-auto text-xs text-slate-400">
+            <span className="ml-auto flex items-center gap-3 text-xs text-slate-400">
               แสดง {filteredTickets.length} จาก {totalTickets} tickets
+              <button
+                onClick={copyViewLink}
+                title="คัดลอกลิงก์ที่มีตัวกรองนี้ ส่งให้ทีมเปิดแล้วเห็นแบบเดียวกัน"
+                className="rounded-lg border border-slate-300 dark:border-slate-600 px-2.5 py-1 font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors"
+              >
+                {copied ? 'คัดลอกแล้ว ✓' : 'คัดลอกลิงก์มุมมองนี้'}
+              </button>
             </span>
           </div>
 
@@ -1805,12 +818,12 @@ export default function DashboardPage() {
                 {filteredTickets.map(t => (
                   <tr
                     key={t.key}
-                    onClick={() => setSelectedTicket(t)}
+                    onClick={() => openTicket(t.key)}
                     className="border-b border-slate-100 dark:border-slate-700/50 hover:bg-blue-50 dark:hover:bg-blue-950/20 cursor-pointer transition-colors align-top"
                   >
                     <td className="py-2 px-3 font-medium whitespace-nowrap overflow-hidden">
                       <a
-                        href={`https://ascendcommerce-support.atlassian.net/browse/${t.key}`}
+                        href={jiraBrowseUrl(t.key)}
                         target="_blank"
                         rel="noopener noreferrer"
                         onClick={(e) => e.stopPropagation()}
@@ -1863,7 +876,7 @@ export default function DashboardPage() {
               </tbody>
             </table>
           </div>
-          <p className="text-xs text-slate-400 mt-3">คลิกแถวเพื่อดูรายละเอียดเต็ม · คลิกหัวตารางเพื่อเรียงลำดับ</p>
+          <p className="text-xs text-slate-400 mt-3">คลิกแถวเพื่อดูรายละเอียดเต็ม · คลิกหัวตารางเพื่อเรียงลำดับ · ในหน้าต่าง ticket กด ← / → เพื่อเลื่อนใบ</p>
         </div>
 
       </main>
@@ -1880,11 +893,13 @@ export default function DashboardPage() {
 
       {selectedTicket && (
         <TicketDetailModal
+          key={selectedTicket.key}
           ticket={selectedTicket}
           reportId={id as string}
-          onClose={() => setSelectedTicket(null)}
+          nav={ticketNav}
+          autoEdit={fillMode && canEdit}
+          onClose={() => openTicket(null)}
           onUpdated={(updated) => {
-            setSelectedTicket(updated)
             setData(prev => prev ? {
               ...prev,
               tickets: prev.tickets.map(t => t.key === updated.key ? updated : t),

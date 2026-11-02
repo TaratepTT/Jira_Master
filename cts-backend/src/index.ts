@@ -15,8 +15,10 @@ import reportsRouter from './routes/reports.js'
 import exportRouter  from './routes/export.js'
 import healthRouter  from './routes/health.js'
 import jiraRouter    from './routes/jira.js'
+import jiraOAuthRouter from './routes/jiraOAuth.js'
 import { errorHandler } from './middleware/errorHandler.js'
 import { requireAuth, requireRole } from './middleware/requireAuth.js'
+import { withUserJira } from './middleware/jiraUser.js'
 
 // ── App ───────────────────────────────────────────────────────
 const app = express()
@@ -114,10 +116,13 @@ app.use('/api/auth',   authRouter)
 // viewer = read-only · editor = sync/edit/comment/upload · admin = + delete reports & manage users
 // (routes inside reports.ts add finer checks: edit/comment need editor, delete needs admin)
 app.use('/api/upload',  requireAuth, requireRole('editor', 'admin'), uploadRouter)
-app.use('/api/reports', requireAuth, reportsRouter)
+// withUserJira: Jira calls run as the user's own Atlassian account when they connected one
+// ("บัญชีของฉัน" → เชื่อมบัญชี Jira), otherwise as the shared API token.
+app.use('/api/reports', requireAuth, withUserJira, reportsRouter)
 app.use('/api/export',  requireAuth, exportRouter)
 app.use('/api/compare', requireAuth, compareRouter)
-app.use('/api/jira',    requireAuth, requireRole('editor', 'admin'), jiraRouter)
+app.use('/api/jira',    requireAuth, requireRole('editor', 'admin'), withUserJira, jiraRouter)
+app.use('/api/jira-oauth', requireAuth, jiraOAuthRouter)
 app.use('/api/admin',   requireAuth, requireRole('admin'), adminRouter)
 app.use('/api/insights', requireAuth, insightsRouter) // GET = any user, POST = editor/admin (checked inside)
 

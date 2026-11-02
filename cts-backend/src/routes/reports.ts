@@ -1,7 +1,7 @@
 import { Router, Request, Response, NextFunction } from 'express'
 import prisma from '../lib/prisma.js'
 import {
-  pushTicketUpdateToJira, fetchAllowedStatuses, normalizeDeployDate,
+  pushTicketUpdateToJira, fetchAllowedStatuses, normalizeDeployDate, fetchLiveStatus, fetchIssuesByKeys,
   fetchExtraFields, prepareExtraFieldUpdate, EXTRA_FIELD_NAMES,
   type JiraUpdateInput, type ExtraFieldInput,
 } from '../lib/jira.js'
@@ -11,8 +11,26 @@ import { fetchJiraComments, fetchJiraChangelog, addJiraComment } from '../lib/ji
 import { fetchJiraAttachments, downloadJiraAttachment } from '../lib/jira.js'
 import { buildAggregations } from '../lib/aggregate.js'
 import { requireRole, type AuthedRequest } from '../middleware/requireAuth.js'
+import { currentJiraActor } from '../lib/jiraContext.js'
 
 const router = Router()
+
+// Who the current request writes to Jira as — returned to the UI and kept in the audit log.
+function jiraIdentity(): { jiraAs: 'user' | 'shared'; jiraUser?: string; jiraNotice?: string } {
+  const a = currentJiraActor()
+  return {
+    jiraAs: a?.mode ?? 'shared',
+    ...(a?.displayName ? { jiraUser: a.displayName } : {}),
+    ...(a?.fallbackReason ? { jiraNotice: a.fallbackReason } : {}),
+  }
+}
+
+// Jira date string -> Date (null when empty or unparseable)
+function toDate(v: string | null | undefined): Date | null {
+  if (!v) return null
+  const d = new Date(v)
+  return Number.isNaN(d.getTime()) ? null : d
+}
 
 // ── GET /api/reports  ─────────────────────────────────────────
 router.get('/', async (_req: Request, res: Response, next: NextFunction) => {
@@ -59,6 +77,7 @@ router.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
       name:         report.name,
       totalTickets: report.totalTickets,
       createdAt:    report.createdAt,
+      refreshedAt:  report.refreshedAt,
 
       // raw tickets — includes rootCause, resolution, deployDate, assignee, priority
       tickets: tickets.map((t) => ({
@@ -76,6 +95,7 @@ router.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
         assignee:           t.assignee,
         priority:           t.priority,
         ticketCreatedAt:    t.ticketCreatedAt?.toISOString() ?? null,
+        resolvedAt:         t.resolvedAt?.toISOString() ?? null,
       })),
 
       aggregations: ag,
@@ -97,12 +117,17 @@ router.get('/:id/tickets/:key/transitions', requireRole('editor', 'admin'), asyn
       res.status(404).json({ message: 'ไม่พบ ticket นี้ใน report' })
       return
     }
-    try {
-      const { allowed, details, queued } = await fetchAllowedStatuses(key)
-      res.json({ current: ticket.status, allowed, details, queued })
-    } catch (err) {
+    // `live` = the status in Jira right now. The report stores a snapshot, which may be older:
+    // the edit modal labels `live` as the current status so the dropdown matches what Jira offers.
+    const [tr, live] = await Promise.allSettled([fetchAllowedStatuses(key), fetchLiveStatus(key)])
+    const liveStatus = live.status === 'fulfilled' ? live.value : null
+    if (tr.status === 'fulfilled') {
+      const { allowed, details, queued } = tr.value
+      res.json({ current: ticket.status, live: liveStatus, allowed, details, queued, ...jiraIdentity() })
+    } else {
+      const err = tr.reason
       console.error(`[jira] transitions failed for ${key}:`, err instanceof Error ? err.message : err)
-      res.json({ current: ticket.status, allowed: [], error: 'ดึงรายการสถานะที่เปลี่ยนได้จาก Jira ไม่สำเร็จ' })
+      res.json({ current: ticket.status, live: liveStatus, allowed: [], error: 'ดึงรายการสถานะที่เปลี่ยนได้จาก Jira ไม่สำเร็จ', ...jiraIdentity() })
     }
   } catch (err) {
     next(err)
@@ -208,7 +233,7 @@ router.patch('/:id/tickets/:key', requireRole('editor', 'admin'), async (req: Re
       ticketKey: key,
       summary: `แก้ไข ${key}: ${Object.keys(changes).join(', ') || 'ไม่มีการเปลี่ยนแปลง'}${ok ? '' : ' (Jira มีคำเตือน)'}`,
       details: {
-        changes, warnings, jiraOk: ok,
+        changes, warnings, jiraOk: ok, ...jiraIdentity(),
         ...(input.transitionResolution ? { transitionResolution: input.transitionResolution } : {}),
         ...(input.status ? { statusRequested: input.status, statusPath } : {}),
       },
@@ -218,6 +243,7 @@ router.patch('/:id/tickets/:key', requireRole('editor', 'admin'), async (req: Re
     res.json({
       message: ok ? 'อัปเดตและ sync ไป Jira สำเร็จ' : 'อัปเดตบางส่วนสำเร็จ — มีคำเตือน',
       warnings,
+      ...jiraIdentity(),
       ticket: {
         key:                updated.key,
         system:             updated.system,
@@ -230,7 +256,101 @@ router.patch('/:id/tickets/:key', requireRole('editor', 'admin'), async (req: Re
         rootCause:          updated.rootCause,
         resolution:         updated.resolution,
         deployDate:         updated.deployDate,
+        assignee:           updated.assignee,
+        priority:           updated.priority,
+        ticketCreatedAt:    updated.ticketCreatedAt?.toISOString() ?? null,
+        resolvedAt:         updated.resolvedAt?.toISOString() ?? null,
       },
+    })
+  } catch (err) {
+    next(err)
+  }
+})
+
+// ── POST /api/reports/:id/refresh ─────────────────────────────────
+// "รีเฟรชจาก Jira": pull the CURRENT status / assignee / priority / resolved date of every
+// ticket in this report, without creating a new report.
+//   - status, assignee, priority, resolved date: always taken from Jira (they change over time)
+//   - BU / Type of Issue / Root Cause / Resolution / Deploy Date: only FILLED IN from Jira when
+//     the report has them empty — values typed into the report are never overwritten.
+// Tickets that no longer exist in Jira (deleted / moved) are left untouched and reported back.
+const REFRESH_MAX = 5000
+
+router.post('/:id/refresh', requireRole('editor', 'admin'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { id } = req.params
+    const report = await prisma.report.findUnique({ where: { id }, include: { tickets: true } })
+    if (!report) { res.status(404).json({ message: 'ไม่พบ report นี้' }); return }
+    if (report.tickets.length > REFRESH_MAX) {
+      res.status(400).json({ message: `report ใหญ่เกิน ${REFRESH_MAX} tickets — รีเฟรชไม่ได้` }); return
+    }
+
+    let fetched: Awaited<ReturnType<typeof fetchIssuesByKeys>>
+    try {
+      fetched = await fetchIssuesByKeys(report.tickets.map(t => t.key))
+    } catch (err) {
+      const e = err as { response?: { status?: number } }
+      console.error('[refresh] Jira fetch failed:', err instanceof Error ? err.message : err)
+      res.status(502).json({ message: `ดึงข้อมูลจาก Jira ไม่สำเร็จ${e?.response?.status ? ` (HTTP ${e.response.status})` : ''} — ลองใหม่อีกครั้ง` })
+      return
+    }
+    const live = new Map(fetched.issues.map(i => [i.key, i]))
+
+    const statusChanges: Array<{ key: string; from: string; to: string }> = []
+    const updates: Array<{ id: string; data: Record<string, unknown> }> = []
+    let filled = 0
+
+    for (const t of report.tickets) {
+      const j = live.get(t.key)
+      if (!j) continue
+      const data: Record<string, unknown> = {}
+      if (j.status && j.status !== t.status) { data.status = j.status; statusChanges.push({ key: t.key, from: t.status, to: j.status }) }
+      if ((j.assignee || null) !== (t.assignee || null)) data.assignee = j.assignee || null
+      if ((j.priority || null) !== (t.priority || null)) data.priority = j.priority || null
+      const resolvedAt = toDate(j.resolved)
+      if ((resolvedAt?.getTime() ?? null) !== (t.resolvedAt?.getTime() ?? null)) data.resolvedAt = resolvedAt
+      if (!t.ticketCreatedAt && j.created) data.ticketCreatedAt = toDate(j.created)
+
+      // fill-only fields
+      const fill = (field: 'businessUnit' | 'typeOfIssue' | 'rootCause' | 'resolution' | 'deployDate', v: string) => {
+        const cur = t[field]
+        if ((cur === null || cur === undefined || String(cur).trim() === '') && v && v.trim()) { data[field] = v.trim(); filled++ }
+      }
+      fill('businessUnit', j.businessUnit)
+      fill('typeOfIssue', j.typeOfIssue)
+      fill('rootCause', j.rootCause)
+      fill('resolution', j.resolution)
+      fill('deployDate', j.deployDate)
+
+      if (Object.keys(data).length) updates.push({ id: t.id, data })
+    }
+
+    // Small transactions so a big report does not hold one long transaction open
+    const CHUNK = 50
+    for (let i = 0; i < updates.length; i += CHUNK) {
+      await prisma.$transaction(updates.slice(i, i + CHUNK).map(u => prisma.ticket.update({ where: { id: u.id }, data: u.data })))
+    }
+    const refreshedAt = new Date()
+    await prisma.report.update({ where: { id }, data: { refreshedAt } })
+
+    await recordAudit((req as AuthedRequest).user, {
+      action: 'report.refresh', reportId: id,
+      summary: `รีเฟรช "${report.name}" จาก Jira: อัปเดต ${updates.length} tickets, เปลี่ยนสถานะ ${statusChanges.length}`,
+      details: {
+        updated: updates.length, statusChanges: statusChanges.slice(0, 200), filledFields: filled,
+        missing: fetched.missing.slice(0, 200), ...jiraIdentity(),
+      },
+    })
+
+    res.json({
+      message: updates.length ? `อัปเดตจาก Jira แล้ว ${updates.length} tickets` : 'ข้อมูลตรงกับ Jira อยู่แล้ว',
+      refreshedAt,
+      checked: report.tickets.length,
+      updated: updates.length,
+      statusChanged: statusChanges.length,
+      statusChanges: statusChanges.slice(0, 100),
+      filledFields: filled,
+      missing: fetched.missing,
     })
   } catch (err) {
     next(err)
@@ -421,7 +541,7 @@ router.post('/:id/tickets/:key/comment', requireRole('editor', 'admin'), async (
     await recordAudit(actor, {
       action: 'ticket.comment', reportId: id, ticketKey: key,
       summary: `เพิ่ม comment ที่ ${key}`,
-      details: { text: clip(text.trim(), 500) },
+      details: { text: clip(text.trim(), 500), ...jiraIdentity() },
     })
 
     const comments = await fetchJiraComments(key)
@@ -454,11 +574,18 @@ router.get('/:id/tickets/:key/attachments', async (req: Request, res: Response, 
 // Proxy ดาวน์โหลดไฟล์แนบจริงจาก Jira (ต้องผ่าน backend เพราะ Jira ต้องการ auth)
 router.get('/:id/tickets/:key/attachments/:attachmentId', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { id, attachmentId } = req.params
+    const { id, key, attachmentId } = req.params
 
-    const ticket = await prisma.ticket.findFirst({ where: { reportId: id } })
+    const ticket = await prisma.ticket.findFirst({ where: { reportId: id, key } })
     if (!ticket) {
-      res.status(404).json({ message: 'ไม่พบ report นี้' })
+      res.status(404).json({ message: 'ไม่พบ ticket นี้ใน report' })
+      return
+    }
+    // Only files that belong to THIS ticket — otherwise any signed-in user could download
+    // any attachment in Jira by guessing its id.
+    const attachments = await fetchJiraAttachments(key)
+    if (!attachments.some(a => a.id === attachmentId)) {
+      res.status(404).json({ message: 'ไม่พบไฟล์แนบนี้ใน ticket' })
       return
     }
 

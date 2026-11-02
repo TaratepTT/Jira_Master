@@ -100,9 +100,17 @@ export interface TicketUpdateInput {
   status?: string
 }
 
+// Who the backend wrote to Jira as: the user's own account (OAuth) or the shared API token
+export interface JiraIdentity {
+  jiraAs?: 'user' | 'shared'
+  jiraUser?: string
+  /** set when the user's own connection could not be used (fell back to the shared token) */
+  jiraNotice?: string
+}
+
 export async function updateTicket(reportId: string, key: string, input: TicketUpdateInput) {
   const { data } = await api.patch(`/api/reports/${reportId}/tickets/${key}`, input)
-  return data as {
+  return data as JiraIdentity & {
     message: string
     warnings: string[]
     ticket: {
@@ -117,6 +125,10 @@ export async function updateTicket(reportId: string, key: string, input: TicketU
       rootCause: string
       resolution: string
       deployDate: string
+      assignee?: string | null
+      priority?: string | null
+      ticketCreatedAt?: string | null
+      resolvedAt?: string | null
     }
   }
 }
@@ -127,8 +139,10 @@ export interface TransitionRequirement {
   resolutionDefault?: string
   needs?: string[]               // other required fields this app cannot fill
 }
-export interface TicketTransitions {
+export interface TicketTransitions extends JiraIdentity {
   current: string
+  /** status in Jira right now (the report holds a snapshot that may be older); null if unknown */
+  live?: string | null
   allowed: string[]
   details?: Record<string, TransitionRequirement>
   queued?: Record<string, string[]>   // status -> steps the app will run one after another to get there
@@ -138,6 +152,52 @@ export interface TicketTransitions {
 export async function getTicketTransitions(reportId: string, key: string): Promise<TicketTransitions> {
   const { data } = await api.get(`/api/reports/${reportId}/tickets/${key}/transitions`)
   return data as TicketTransitions
+}
+
+// ── Refresh a report from Jira (status / assignee / resolved date) ─
+export interface RefreshResult {
+  message: string
+  refreshedAt: string
+  checked: number
+  updated: number
+  statusChanged: number
+  statusChanges: Array<{ key: string; from: string; to: string }>
+  filledFields: number
+  missing: string[]
+}
+
+export async function refreshReportFromJira(reportId: string): Promise<RefreshResult> {
+  const { data } = await api.post(`/api/reports/${reportId}/refresh`, undefined, { timeout: 180_000 })
+  return data as RefreshResult
+}
+
+// ── Per-user Jira account (Atlassian OAuth) ────────────────────
+export interface JiraConnectionStatus {
+  enabled: boolean
+  connected: boolean
+  needsReconnect: boolean
+  account: { displayName: string; email: string | null; siteUrl: string } | null
+  connectedAt: string | null
+}
+
+export async function getJiraConnection(): Promise<JiraConnectionStatus> {
+  const { data } = await api.get('/api/jira-oauth/status')
+  return data as JiraConnectionStatus
+}
+
+export async function startJiraConnection(): Promise<string> {
+  const { data } = await api.post('/api/jira-oauth/start')
+  return (data as { url: string }).url
+}
+
+export async function completeJiraConnection(code: string, state: string): Promise<JiraConnectionStatus & { message: string }> {
+  const { data } = await api.post('/api/jira-oauth/complete', { code, state })
+  return data as JiraConnectionStatus & { message: string }
+}
+
+export async function disconnectJira(): Promise<JiraConnectionStatus & { message: string }> {
+  const { data } = await api.delete('/api/jira-oauth')
+  return data as JiraConnectionStatus & { message: string }
 }
 
 // ── Bulk edit: many tickets at once, written back to Jira ─────

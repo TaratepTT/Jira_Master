@@ -14,6 +14,8 @@ model Report {
   totalTickets Int      @default(0)
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
+  // Last time "รีเฟรชจาก Jira" pulled live status/assignee/resolved date into this report
+  refreshedAt  DateTime? @map("refreshed_at")
 
   tickets      Ticket[]
   insights     ReportInsight[]
@@ -38,11 +40,14 @@ model Ticket {
   assignee           String?  @map("assignee")
   priority           String?  @map("priority")
   ticketCreatedAt    DateTime? @map("ticket_created_at")
+  // Jira's built-in "resolutiondate" — used for Created vs Resolved and time-to-resolve
+  resolvedAt         DateTime? @map("resolved_at")
 
   report Report @relation(fields: [reportId], references: [id], onDelete: Cascade)
 
   @@index([reportId])
   @@index([reportId, key])
+  @@index([key]) // carry-over: find the same ticket in earlier reports
   @@map("tickets")
 }
 
@@ -107,4 +112,27 @@ model AuditLog {
   @@index([action, createdAt])
   @@index([ticketKey])
   @@map("audit_logs")
+}
+
+// A user's own Atlassian account, connected with OAuth 2.0 (3LO).
+// When present, that user's Jira reads/writes run as THEM (their name in Jira history,
+// their workflow permissions) instead of the shared API token.
+// Tokens are stored encrypted (AES-256-GCM, key from JIRA_TOKEN_ENC_KEY).
+model JiraConnection {
+  userId          String   @id @map("user_id")
+  accountId       String   @map("account_id")
+  displayName     String   @map("display_name")
+  email           String?
+  cloudId         String   @map("cloud_id")
+  siteUrl         String   @map("site_url")
+  accessTokenEnc  String   @map("access_token_enc")
+  refreshTokenEnc String   @map("refresh_token_enc")
+  expiresAt       DateTime @map("expires_at")
+  scopes          String
+  // false after a refresh failed (revoked / expired) — the user must connect again
+  valid           Boolean  @default(true)
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  @@map("jira_connections")
 }

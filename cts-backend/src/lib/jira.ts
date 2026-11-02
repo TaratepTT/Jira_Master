@@ -1,10 +1,13 @@
-import axios from 'axios'
+import axios, { type AxiosInstance } from 'axios'
+import { jiraAls, jiraMode } from './jiraContext.js'
 
 const JIRA_BASE_URL = process.env.JIRA_BASE_URL ?? ''
 const JIRA_EMAIL    = process.env.JIRA_EMAIL ?? ''
 const JIRA_TOKEN    = process.env.JIRA_API_TOKEN ?? ''
 
-const jiraClient = axios.create({
+// Shared client: the API token of JIRA_EMAIL. Used when the signed-in user has not
+// connected their own Atlassian account (see lib/jiraOAuth.ts + middleware/jiraUser.ts).
+export const sharedJiraClient = axios.create({
   baseURL: `${JIRA_BASE_URL}/rest/api/3`,
   auth: { username: JIRA_EMAIL, password: JIRA_TOKEN },
   headers: {
@@ -13,6 +16,12 @@ const jiraClient = axios.create({
   },
   timeout: 30_000,
 })
+
+// The client for THIS request: the user's own OAuth client when they connected Jira,
+// otherwise the shared token client.
+function jc(): AxiosInstance {
+  return jiraAls.getStore()?.client ?? sharedJiraClient
+}
 
 // ── Field IDs ─────────────────────────────────────────────────
 const FIELDS = [
@@ -128,7 +137,7 @@ export async function fetchJiraIssuesWithMeta(
     let data: Record<string, unknown>
 
     try {
-      const resp = await jiraClient.post('/search/jql', body)
+      const resp = await jc().post('/search/jql', body)
       data = resp.data as Record<string, unknown>
     } catch (err: unknown) {
       const e = err as { response?: { status?: number; data?: unknown } }
@@ -158,9 +167,64 @@ export async function fetchJiraIssues(jql: string, maxTotal: number = 500): Prom
   return (await fetchJiraIssuesWithMeta(jql, maxTotal)).issues
 }
 
+// ── Fetch specific tickets by key (for "รีเฟรชจาก Jira") ─────────
+// Uses Jira's bulk-fetch endpoint, which — unlike JQL `key in (...)` — does not fail the whole
+// request when one key was deleted or moved: those come back in `missing` instead.
+// Falls back to JQL (one small batch at a time) if the bulk endpoint is unavailable.
+export async function fetchIssuesByKeys(keys: string[]): Promise<{ issues: JiraIssue[]; missing: string[] }> {
+  const unique = Array.from(new Set(keys.filter(Boolean)))
+  const issues: JiraIssue[] = []
+  const found = new Set<string>()
+  const BATCH = 100
+
+  for (let i = 0; i < unique.length; i += BATCH) {
+    const batch = unique.slice(i, i + BATCH)
+    let page: Record<string, unknown>[] = []
+    try {
+      const { data } = await jc().post('/issue/bulkfetch', { issueIdsOrKeys: batch, fields: FIELDS })
+      page = ((data as { issues?: Record<string, unknown>[] }).issues ?? [])
+    } catch (err: unknown) {
+      const status = (err as { response?: { status?: number } })?.response?.status
+      if (status !== 404 && status !== 405) throw err
+      // Older API without bulkfetch: JQL in smaller chunks; a chunk with a bad key is retried key by key.
+      page = await fetchByJqlTolerant(batch)
+    }
+    for (const raw of page) {
+      const mapped = mapIssue(raw)
+      if (mapped.key && !found.has(mapped.key)) { found.add(mapped.key); issues.push(mapped) }
+    }
+  }
+  // A ticket moved to another project comes back under its NEW key; we match on the requested key only.
+  return { issues, missing: unique.filter(k => !found.has(k)) }
+}
+
+async function fetchByJqlTolerant(keys: string[]): Promise<Record<string, unknown>[]> {
+  const safe = keys.filter(k => /^[A-Z][A-Z0-9_]*-\d+$/i.test(k))
+  if (!safe.length) return []
+  try {
+    const { data } = await jc().post('/search/jql', { jql: `key in (${safe.join(',')})`, maxResults: safe.length, fields: FIELDS })
+    return ((data as { issues?: Record<string, unknown>[] }).issues ?? [])
+  } catch {
+    if (safe.length === 1) return []
+    const out: Record<string, unknown>[] = []
+    for (const k of safe) out.push(...await fetchByJqlTolerant([k]))
+    return out
+  }
+}
+
+// ── The ticket's status in Jira right now ─────────────────────────
+export async function fetchLiveStatus(key: string): Promise<string | null> {
+  try {
+    const { data } = await jc().get(`/issue/${key}`, { params: { fields: 'status' } })
+    return str((data as { fields?: { status?: unknown } })?.fields?.status) || null
+  } catch {
+    return null
+  }
+}
+
 // ── Test connection ───────────────────────────────────────────
 export async function testJiraConnection(): Promise<{ ok: boolean; email: string }> {
-  const { data } = await jiraClient.get('/myself')
+  const { data } = await jc().get('/myself')
   return { ok: true, email: (data as { emailAddress: string }).emailAddress }
 }
 
@@ -206,7 +270,7 @@ function toAdf(text: string): unknown {
 async function updateJiraFields(key: string, fields: Record<string, unknown>): Promise<void> {
   if (Object.keys(fields).length === 0) return
   try {
-    await jiraClient.put(`/issue/${key}`, { fields })
+    await jc().put(`/issue/${key}`, { fields })
   } catch (err: unknown) {
     const e = err as { response?: { status?: number; data?: unknown } }
     console.error(`[jira] PUT /issue/${key} failed — status ${e?.response?.status}`, JSON.stringify(e?.response?.data))
@@ -232,7 +296,7 @@ interface JiraTransition {
 }
 
 async function getTransitions(key: string): Promise<JiraTransition[]> {
-  const { data } = await jiraClient.get(`/issue/${key}/transitions`, { params: { expand: 'transitions.fields' } })
+  const { data } = await jc().get(`/issue/${key}/transitions`, { params: { expand: 'transitions.fields' } })
   return (data.transitions ?? []) as JiraTransition[]
 }
 
@@ -381,7 +445,7 @@ function isEchoable(id: string, f: JiraTransitionField): boolean {
 async function fetchCurrentFieldValues(key: string, ids: string[]): Promise<Record<string, unknown>> {
   if (!ids.length) return {}
   try {
-    const { data } = await jiraClient.get(`/issue/${key}`, { params: { fields: ids.join(',') } })
+    const { data } = await jc().get(`/issue/${key}`, { params: { fields: ids.join(',') } })
     return (data?.fields ?? {}) as Record<string, unknown>
   } catch (err) {
     console.error(`[jira] could not read current field values of ${key}:`, err instanceof Error ? err.message : err)
@@ -470,7 +534,7 @@ async function transitionIssueToStatus(
   }
 
   const post = (fields: Record<string, unknown>) =>
-    jiraClient.post(`/issue/${key}/transitions`, {
+    jc().post(`/issue/${key}/transitions`, {
       transition: { id: match.id },
       ...(Object.keys(fields).length ? { fields } : {}),
     })
@@ -551,7 +615,7 @@ interface RawOption { id?: unknown; value?: unknown; name?: unknown; children?: 
 const optLabel = (o: RawOption | null | undefined): string => String(o?.value ?? o?.name ?? '')
 
 export async function fetchExtraFields(key: string): Promise<ExtraFieldMeta[]> {
-  const { data } = await jiraClient.get(`/issue/${key}/editmeta`)
+  const { data } = await jc().get(`/issue/${key}/editmeta`)
   const raw = (data?.fields ?? {}) as Record<string, {
     name?: string; required?: boolean
     schema?: { type?: string; items?: string; custom?: string }
@@ -822,7 +886,7 @@ function adfToPlainText(v: unknown): string {
 
 // ── Fetch comments for a ticket ──────────────────────────────────
 export async function fetchJiraComments(key: string): Promise<JiraComment[]> {
-  const { data } = await jiraClient.get(`/issue/${key}/comment`, {
+  const { data } = await jc().get(`/issue/${key}/comment`, {
     params: { orderBy: '-created', maxResults: 50 },
   })
   const comments = (data.comments ?? []) as Array<Record<string, unknown>>
@@ -836,7 +900,7 @@ export async function fetchJiraComments(key: string): Promise<JiraComment[]> {
 
 // ── Fetch changelog (status/field change history) for a ticket ──
 export async function fetchJiraChangelog(key: string): Promise<JiraChangelogEntry[]> {
-  const { data } = await jiraClient.get(`/issue/${key}`, {
+  const { data } = await jc().get(`/issue/${key}`, {
     params: { expand: 'changelog' },
   })
   const histories = (data.changelog?.histories ?? []) as Array<Record<string, unknown>>
@@ -865,7 +929,8 @@ export async function addJiraComment(key: string, text: string, author?: string)
       content: line.trim() ? [{ type: 'text', text: line }] : [],
     }))
 
-  const name = (author ?? '').replace(/[\r\n]+/g, ' ').trim().slice(0, 80)
+  // With the user's own Jira account (OAuth) Jira already shows the real author — no signature needed.
+  const name = jiraMode() === 'user' ? '' : (author ?? '').replace(/[\r\n]+/g, ' ').trim().slice(0, 80)
   if (name) {
     paragraphs.push({
       type: 'paragraph',
@@ -873,12 +938,12 @@ export async function addJiraComment(key: string, text: string, author?: string)
     })
   }
 
-  await jiraClient.post(`/issue/${key}/comment`, {
+  await jc().post(`/issue/${key}/comment`, {
     body: { type: 'doc', version: 1, content: paragraphs },
   })
 }
 
-export default jiraClient
+export default sharedJiraClient
 
 // ══════════════════════════════════════════════════════════════
 // ── ATTACHMENTS — list & download files attached to a ticket ───
@@ -895,7 +960,7 @@ export interface JiraAttachment {
 
 // ── List attachment metadata for a ticket ────────────────────────
 export async function fetchJiraAttachments(key: string): Promise<JiraAttachment[]> {
-  const { data } = await jiraClient.get(`/issue/${key}`, {
+  const { data } = await jc().get(`/issue/${key}`, {
     params: { fields: 'attachment' },
   })
   const attachments = (data.fields?.attachment ?? []) as Array<Record<string, unknown>>
@@ -915,9 +980,9 @@ export async function downloadJiraAttachment(
   attachmentId: string
 ): Promise<{ buffer: Buffer; mimeType: string; filename: string }> {
   // First get metadata to know filename + mimeType (content endpoint doesn't return them)
-  const { data: meta } = await jiraClient.get(`/attachment/${attachmentId}`)
+  const { data: meta } = await jc().get(`/attachment/${attachmentId}`)
 
-  const { data: buffer } = await jiraClient.get(`/attachment/content/${attachmentId}`, {
+  const { data: buffer } = await jc().get(`/attachment/content/${attachmentId}`, {
     responseType: 'arraybuffer',
   })
 
