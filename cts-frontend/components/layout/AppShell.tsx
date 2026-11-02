@@ -2,7 +2,8 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import type { ReactNode } from 'react'
+import { useCallback, useState, type ReactNode } from 'react'
+import CommandPalette, { useCommandPaletteShortcut } from './CommandPalette'
 import ThemeToggle from '@/components/theme/ThemeToggle'
 import LogoutButton from '@/components/auth/LogoutButton'
 import { useAuth } from '@/components/auth/AuthContext'
@@ -12,6 +13,10 @@ import { useAuth } from '@/components/auth/AuthContext'
 export function AppNav() {
   const pathname = usePathname() ?? '/'
   const { user, canEdit, isAdmin } = useAuth()
+  const [paletteOpen, setPaletteOpen] = useState(false)
+  const openPalette = useCallback(() => setPaletteOpen(true), [])
+  const closePalette = useCallback(() => setPaletteOpen(false), [])
+  useCommandPaletteShortcut(openPalette)
 
   const items: Array<{ href: string; label: string; match: (p: string) => boolean; show: boolean }> = [
     { href: '/', label: 'Reports', match: p => p === '/' || p.startsWith('/dashboard') || p.startsWith('/history'), show: true },
@@ -46,6 +51,18 @@ export function AppNav() {
           })}
         </div>
         <div className="flex shrink-0 items-center gap-2">
+          <button
+            type="button"
+            onClick={openPalette}
+            className="hidden items-center gap-2 rounded-md border border-line-strong px-2.5 py-1 text-[13px] text-muted transition-colors hover:bg-sunken hover:text-ink md:flex"
+            aria-label="ค้นหา (Ctrl+K)"
+          >
+            ค้นหา
+            <kbd className="key rounded border border-line px-1 text-[11px] text-faint">Ctrl K</kbd>
+          </button>
+          <button type="button" onClick={openPalette} className="flex h-8 w-8 items-center justify-center rounded-md text-muted hover:bg-sunken md:hidden" aria-label="ค้นหา">
+            <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" /></svg>
+          </button>
           {user && (
             <Link
               href="/account"
@@ -61,6 +78,7 @@ export function AppNav() {
           <LogoutButton />
         </div>
       </div>
+      <CommandPalette open={paletteOpen} onClose={closePalette} />
     </nav>
   )
 }

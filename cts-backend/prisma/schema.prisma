@@ -136,3 +136,19 @@ model JiraConnection {
 
   @@map("jira_connections")
 }
+
+// A named set of Dashboard filters a user saved ("มุมมองที่บันทึก"), e.g. "Makro ที่ยังเปิด".
+// `query` is the dashboard's URL query string (bu=..&st=..), so a view works on any report.
+// shared = visible to everyone (only its owner can delete it).
+model SavedView {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  userName  String   @map("user_name")
+  name      String
+  query     String
+  shared    Boolean  @default(false)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([userId])
+  @@map("saved_views")
+}

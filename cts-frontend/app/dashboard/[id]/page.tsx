@@ -3,8 +3,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
-import api, { refreshReportFromJira, type BulkUpdateResponse } from '@/lib/api'
-import { useUrlFilters } from '@/lib/useUrlFilters'
+import api, { refreshReportFromJira, updateTicket, getJiraConnection, type BulkUpdateResponse } from '@/lib/api'
+import { useUrlFilters, filtersToQuery, readFilters } from '@/lib/useUrlFilters'
+import ViewsMenu from '@/components/dashboard/ViewsMenu'
+import InlineCell, { type CellState } from '@/components/dashboard/InlineCell'
 import { AppNav, PageHeader } from '@/components/layout/AppShell'
 import ExpandableKeys from '@/components/dashboard/ExpandableKeys'
 import { useAuth } from '@/components/auth/AuthContext'
@@ -63,7 +65,7 @@ function sortTickets(list: TicketDetail[], sortKey: SortKey | null, sortDir: Sor
 // ── Main dashboard ─────────────────────────────────────────────
 export default function DashboardPage() {
   const { id } = useParams<{ id: string }>()
-  const { canEdit } = useAuth()
+  const { canEdit, user } = useAuth()
   const [bulkOpen, setBulkOpen] = useState(false)
   const [data, setData] = useState<ReportData | null>(null)
   const [error, setError] = useState('')
@@ -85,6 +87,19 @@ export default function DashboardPage() {
   const setStatusFilter = (status: string[]) => setFilters({ status })
   const setSystemFilter = (system: string[]) => setFilters({ system })
   const setCategoryFilter = (category: string[]) => setFilters({ category })
+  const assigneeFilter = filters.assignee
+  const setAssigneeFilter = (assignee: string[]) => setFilters({ assignee })
+
+  // "งานของฉัน": match the ticket assignee against my Jira name (when my Jira account is
+  // connected) or my Dashboard name.
+  const [jiraName, setJiraName] = useState<string | null>(null)
+  useEffect(() => {
+    getJiraConnection().then(c => setJiraName(c.connected ? c.account?.displayName ?? null : null)).catch(() => setJiraName(null))
+  }, [])
+
+  // "แก้ในตาราง": BU / Type / Root Cause / Resolution become editable cells (saved to Jira one by one)
+  const [inlineEdit, setInlineEdit] = useState(false)
+  const [cellStatus, setCellStatus] = useState<Record<string, CellState>>({})
 
   // Ticket modal. `fillMode` = the "ไล่กรอกข้อมูลที่ยังไม่ครบ" queue: each ticket opens in edit mode.
   const [fillMode, setFillMode] = useState(false)
@@ -201,6 +216,19 @@ export default function DashboardPage() {
     return Object.entries(counts).sort((a, b) => b[1] - a[1]).map(([value, count]) => ({ value, count }))
   }, [data])
 
+  const assigneeOptions = useMemo(() => {
+    if (!data) return []
+    const counts: Record<string, number> = {}
+    data.tickets.forEach(t => {
+      const a = t.assignee || 'ไม่มีผู้รับผิดชอบ'
+      counts[a] = (counts[a] ?? 0) + 1
+    })
+    return Object.entries(counts).sort((a, b) => b[1] - a[1]).map(([value, count]) => ({ value, count }))
+  }, [data])
+
+  const myNames = [jiraName, user?.name].filter((n): n is string => !!n)
+  const myAssignee = assigneeOptions.find(o => myNames.some(n => n.trim().toLowerCase() === o.value.trim().toLowerCase()))?.value ?? null
+
   const categoryOptions = useMemo(() => {
     if (!data) return []
     const counts: Record<string, number> = {}
@@ -228,11 +256,13 @@ export default function DashboardPage() {
       const matchSystem = !systemFilter.length || systemFilter.includes(t.system || 'ไม่ระบุ')
       const matchCategory = !categoryFilter.length || categoryFilter.includes(t.typeOfIssue || 'ไม่ระบุ')
 
-      return matchSearch && matchBu && matchStatus && matchSystem && matchCategory
+      const matchAssignee = !assigneeFilter.length || assigneeFilter.includes(t.assignee || 'ไม่มีผู้รับผิดชอบ')
+
+      return matchSearch && matchBu && matchStatus && matchSystem && matchCategory && matchAssignee
     })
 
     return sortTickets(result, sortKey, sortDir)
-  }, [data, search, buFilter, statusFilter, systemFilter, categoryFilter, incompleteOnly, sortKey, sortDir])
+  }, [data, search, buFilter, statusFilter, systemFilter, categoryFilter, assigneeFilter, incompleteOnly, sortKey, sortDir])
 
   // Prev/next in the modal follows the table as it is filtered/sorted right now.
   // In the fill-in queue the list is FROZEN when the queue starts, so a ticket that becomes
@@ -285,11 +315,25 @@ export default function DashboardPage() {
     else setFilters({ sort: key, dir: 'asc' })
   }
 
-  const activeFilterCount = buFilter.length + statusFilter.length + systemFilter.length + categoryFilter.length + (incompleteOnly ? 1 : 0)
+  const activeFilterCount = buFilter.length + statusFilter.length + systemFilter.length + categoryFilter.length + assigneeFilter.length + (incompleteOnly ? 1 : 0)
   const hasActiveFilterOrSearch = activeFilterCount > 0 || search.trim().length > 0
 
   const clearAllFilters = () => {
-    setFilters({ bu: [], status: [], system: [], category: [], q: '', incomplete: false })
+    setFilters({ bu: [], status: [], system: [], category: [], assignee: [], q: '', incomplete: false })
+  }
+
+  // Save one inline-edited cell to Jira (same endpoint as the ticket window)
+  const saveCell = async (key: string, field: 'businessUnit' | 'typeOfIssue' | 'rootCause' | 'resolution', value: string) => {
+    const id_ = `${key}:${field}`
+    setCellStatus(s => ({ ...s, [id_]: { state: 'saving' } }))
+    try {
+      const r = await updateTicket(id as string, key, { [field]: value })
+      setData(prev => prev ? { ...prev, tickets: prev.tickets.map(t => (t.key === key ? { ...t, ...r.ticket } as TicketDetail : t)) } : prev)
+      setCellStatus(s => ({ ...s, [id_]: r.warnings.length ? { state: 'error', message: r.warnings.join(' | ') } : { state: 'saved' } }))
+      if (!r.warnings.length) setTimeout(() => setCellStatus(s => { const n = { ...s }; if (n[id_]?.state === 'saved') delete n[id_]; return n }), 2500)
+    } catch (e: unknown) {
+      setCellStatus(s => ({ ...s, [id_]: { state: 'error', message: (e as { response?: { data?: { message?: string } } })?.response?.data?.message ?? 'บันทึกไม่สำเร็จ' } }))
+    }
   }
 
   const [copied, setCopied] = useState(false)
@@ -598,9 +642,23 @@ export default function DashboardPage() {
                 aria-label="ค้นหา ticket"
                 className="field w-64"
               />
+              <ViewsMenu
+                currentQuery={filtersToQuery({ ...filters, ticket: null }).replace(/^\?/, '')}
+                onApply={q => setFilters({ ...readFilters(`?${q}`), ticket: null })}
+              />
               <button onClick={copyViewLink} className="btn" title="คัดลอกลิงก์ที่มีตัวกรองนี้ ส่งให้ทีมเปิดแล้วเห็นแบบเดียวกัน">
                 {copied ? 'คัดลอกแล้ว' : 'คัดลอกลิงก์'}
               </button>
+              {canEdit && (
+                <button
+                  onClick={() => setInlineEdit(v => !v)}
+                  aria-pressed={inlineEdit}
+                  title="แก้ BU, Type of Issue, Root Cause และ Resolution ในตารางได้เลย แต่ละช่องบันทึกลง Jira ทันทีที่ออกจากช่อง"
+                  className={inlineEdit ? 'btn-primary' : 'btn'}
+                >
+                  {inlineEdit ? 'เลิกแก้ในตาราง' : 'แก้ในตาราง'}
+                </button>
+              )}
             </div>
           </div>
 
@@ -611,6 +669,16 @@ export default function DashboardPage() {
               <MultiSelectFilter label="Status" options={statusOptions} selected={statusFilter} onChange={setStatusFilter} />
               <MultiSelectFilter label="ระบบ" options={systemOptions} selected={systemFilter} onChange={setSystemFilter} />
               <MultiSelectFilter label="Type of Issue" options={categoryOptions} selected={categoryFilter} onChange={setCategoryFilter} />
+              <MultiSelectFilter label="ผู้รับผิดชอบ" options={assigneeOptions} selected={assigneeFilter} onChange={setAssigneeFilter} />
+              <button
+                onClick={() => myAssignee && setAssigneeFilter(assigneeFilter.length === 1 && assigneeFilter[0] === myAssignee ? [] : [myAssignee])}
+                disabled={!myAssignee}
+                aria-pressed={!!myAssignee && assigneeFilter.length === 1 && assigneeFilter[0] === myAssignee}
+                title={myAssignee ? `ticket ที่ ${myAssignee} รับผิดชอบ` : `ไม่พบ ticket ที่ assignee ตรงกับชื่อคุณ (${myNames.join(' / ') || '—'}) ใน report นี้`}
+                className={myAssignee && assigneeFilter.length === 1 && assigneeFilter[0] === myAssignee ? 'btn border-accent bg-accent-soft text-accent hover:bg-accent-soft' : 'btn'}
+              >
+                งานของฉัน
+              </button>
               <button
                 onClick={() => setFilters({ incomplete: !incompleteOnly })}
                 aria-pressed={incompleteOnly}
@@ -623,13 +691,14 @@ export default function DashboardPage() {
               )}
             </div>
 
-            {(buFilter.length > 0 || statusFilter.length > 0 || systemFilter.length > 0 || categoryFilter.length > 0) && (
+            {(buFilter.length > 0 || statusFilter.length > 0 || systemFilter.length > 0 || categoryFilter.length > 0 || assigneeFilter.length > 0) && (
               <div className="flex flex-wrap gap-1.5 border-b border-line px-4 py-2.5">
                 {([
                   ['BU', buFilter, (v: string) => setBuFilter(buFilter.filter(x => x !== v))],
                   ['Status', statusFilter, (v: string) => setStatusFilter(statusFilter.filter(x => x !== v))],
                   ['ระบบ', systemFilter, (v: string) => setSystemFilter(systemFilter.filter(x => x !== v))],
                   ['Type', categoryFilter, (v: string) => setCategoryFilter(categoryFilter.filter(x => x !== v))],
+                  ['ผู้รับผิดชอบ', assigneeFilter, (v: string) => setAssigneeFilter(assigneeFilter.filter(x => x !== v))],
                 ] as Array<[string, string[], (v: string) => void]>).flatMap(([label, list, remove]) => list.map(v => (
                   <span key={`${label}-${v}`} className="inline-flex items-center gap-1 rounded bg-accent-soft py-0.5 pl-2 pr-1 text-[12px] text-accent">
                     {label}: {v}
@@ -682,8 +751,8 @@ export default function DashboardPage() {
                     return (
                       <tr
                         key={t.key}
-                        onClick={() => openTicket(t.key)}
-                        className={`cursor-pointer border-b border-line align-top transition-colors hover:bg-sunken ${highlighted.has(t.key) ? 'bg-accent-soft' : ''}`}
+                        onClick={() => { if (!inlineEdit) openTicket(t.key) }}
+                        className={`border-b border-line align-top transition-colors ${inlineEdit ? '' : 'cursor-pointer hover:bg-sunken'} ${highlighted.has(t.key) ? 'bg-accent-soft' : ''}`}
                       >
                         <td className="overflow-hidden whitespace-nowrap px-3 py-2">
                           <a
@@ -698,11 +767,19 @@ export default function DashboardPage() {
                           </a>
                         </td>
                         <td className="overflow-hidden whitespace-normal break-words px-3 py-2">{t.summary || empty}</td>
-                        <td className="overflow-hidden whitespace-normal break-words px-3 py-2 text-muted">{t.businessUnit || empty}</td>
+                        <td className="overflow-hidden whitespace-normal break-words px-3 py-2 text-muted">{inlineEdit
+                          ? <InlineCell value={t.businessUnit || ''} label={`Business Unit ของ ${t.key}`} status={cellStatus[`${t.key}:businessUnit`]} onSave={v => saveCell(t.key, 'businessUnit', v)} />
+                          : (t.businessUnit || empty)}</td>
                         <td className="overflow-hidden px-3 py-2"><span className={`chip ${statusBadge(t.status)}`}>{t.status}</span></td>
-                        <td className="overflow-hidden whitespace-normal break-words px-3 py-2 text-muted">{t.typeOfIssue || empty}</td>
-                        <td className="overflow-hidden whitespace-normal break-words px-3 py-2 text-muted">{t.rootCause || empty}</td>
-                        <td className="overflow-hidden whitespace-normal break-words px-3 py-2 text-muted">{t.resolution || empty}</td>
+                        <td className="overflow-hidden whitespace-normal break-words px-3 py-2 text-muted">{inlineEdit
+                          ? <InlineCell value={t.typeOfIssue || ''} label={`Type of Issue ของ ${t.key}`} status={cellStatus[`${t.key}:typeOfIssue`]} onSave={v => saveCell(t.key, 'typeOfIssue', v)} options={TYPE_OF_ISSUE_OPTIONS} />
+                          : (t.typeOfIssue || empty)}</td>
+                        <td className="overflow-hidden whitespace-normal break-words px-3 py-2 text-muted">{inlineEdit
+                          ? <InlineCell value={t.rootCause || ''} label={`Root Cause ของ ${t.key}`} status={cellStatus[`${t.key}:rootCause`]} onSave={v => saveCell(t.key, 'rootCause', v)} multiline />
+                          : (t.rootCause || empty)}</td>
+                        <td className="overflow-hidden whitespace-normal break-words px-3 py-2 text-muted">{inlineEdit
+                          ? <InlineCell value={t.resolution || ''} label={`Resolution ของ ${t.key}`} status={cellStatus[`${t.key}:resolution`]} onSave={v => saveCell(t.key, 'resolution', v)} multiline />
+                          : (t.resolution || empty)}</td>
                         <td className="overflow-hidden whitespace-nowrap px-3 py-2 num">{t.deployDate ? formatDate(t.deployDate) : empty}</td>
                         <td className="px-3 py-2 text-center" onClick={e => e.stopPropagation()}>
                           <input

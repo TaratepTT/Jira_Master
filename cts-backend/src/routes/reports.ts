@@ -99,6 +99,34 @@ router.get('/backlog', async (_req: Request, res: Response, next: NextFunction) 
   }
 })
 
+// ── GET /api/reports/search?q= ───────────────────────────────────
+// For the Ctrl+K palette: tickets whose key or summary matches, newest report first,
+// one row per ticket key (its latest report).
+router.get('/search', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const q = typeof req.query.q === 'string' ? req.query.q.trim().slice(0, 80) : ''
+    if (q.length < 2) { res.json({ tickets: [] }); return }
+    const rows = await prisma.ticket.findMany({
+      where: { OR: [{ key: { contains: q, mode: 'insensitive' } }, { summary: { contains: q, mode: 'insensitive' } }] },
+      select: { key: true, summary: true, status: true, reportId: true, report: { select: { name: true, createdAt: true } } },
+      take: 300,
+    })
+    rows.sort((a, b) => b.report.createdAt.getTime() - a.report.createdAt.getTime())
+    const seen = new Set<string>()
+    const qUpper = q.toUpperCase()
+    const out = []
+    for (const r of rows) {
+      if (seen.has(r.key)) continue
+      seen.add(r.key)
+      out.push({ key: r.key, summary: r.summary ?? '', status: r.status, reportId: r.reportId, reportName: r.report.name, exact: r.key.toUpperCase() === qUpper })
+    }
+    out.sort((a, b) => Number(b.exact) - Number(a.exact))
+    res.json({ tickets: out.slice(0, 12) })
+  } catch (err) {
+    next(err)
+  }
+})
+
 // ── GET /api/reports/:id  ─────────────────────────────────────
 router.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {

@@ -201,6 +201,27 @@ export async function getBacklog(): Promise<BacklogPoint[]> {
   return (data as { reports: BacklogPoint[] }).reports
 }
 
+// ── Ctrl+K: find tickets by key or summary (latest report each) ─
+export interface TicketHit { key: string; summary: string; status: string; reportId: string; reportName: string; exact: boolean }
+export async function searchTickets(q: string): Promise<TicketHit[]> {
+  const { data } = await api.get('/api/reports/search', { params: { q } })
+  return (data as { tickets: TicketHit[] }).tickets
+}
+
+// ── Saved Dashboard views ──────────────────────────────────────
+export interface SavedView { id: string; name: string; query: string; shared: boolean; owner: string; mine: boolean }
+export async function listViews(): Promise<SavedView[]> {
+  const { data } = await api.get('/api/views')
+  return (data as { views: SavedView[] }).views
+}
+export async function createView(name: string, query: string, shared: boolean): Promise<SavedView> {
+  const { data } = await api.post('/api/views', { name, query, shared })
+  return (data as { view: SavedView }).view
+}
+export async function deleteView(id: string): Promise<void> {
+  await api.delete(`/api/views/${id}`)
+}
+
 // ── Per-user Jira account (Atlassian OAuth) ────────────────────
 export interface JiraConnectionStatus {
   enabled: boolean

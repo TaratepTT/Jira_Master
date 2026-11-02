@@ -14,6 +14,7 @@ export interface DashboardFilters {
   status: string[]
   system: string[]
   category: string[]
+  assignee: string[]
   incomplete: boolean
   sort: string | null      // SortKey
   dir: 'asc' | 'desc'
@@ -21,10 +22,10 @@ export interface DashboardFilters {
 }
 
 export const EMPTY_FILTERS: DashboardFilters = {
-  q: '', bu: [], status: [], system: [], category: [], incomplete: false, sort: null, dir: 'asc', ticket: null,
+  q: '', bu: [], status: [], system: [], category: [], assignee: [], incomplete: false, sort: null, dir: 'asc', ticket: null,
 }
 
-const PARAM = { q: 'q', bu: 'bu', status: 'st', system: 'sys', category: 'cat', incomplete: 'incomplete', sort: 'sort', ticket: 't' } as const
+const PARAM = { q: 'q', bu: 'bu', status: 'st', system: 'sys', category: 'cat', assignee: 'as', incomplete: 'incomplete', sort: 'sort', ticket: 't' } as const
 
 export function readFilters(search: string): DashboardFilters {
   const p = new URLSearchParams(search)
@@ -36,6 +37,7 @@ export function readFilters(search: string): DashboardFilters {
     status: p.getAll(PARAM.status),
     system: p.getAll(PARAM.system),
     category: p.getAll(PARAM.category),
+    assignee: p.getAll(PARAM.assignee),
     incomplete: p.get(PARAM.incomplete) === '1',
     sort: sort || null,
     dir: dir === 'desc' ? 'desc' : 'asc',
@@ -50,6 +52,7 @@ export function filtersToQuery(f: DashboardFilters): string {
   f.status.forEach(v => p.append(PARAM.status, v))
   f.system.forEach(v => p.append(PARAM.system, v))
   f.category.forEach(v => p.append(PARAM.category, v))
+  f.assignee.forEach(v => p.append(PARAM.assignee, v))
   if (f.incomplete) p.set(PARAM.incomplete, '1')
   if (f.sort) p.set(PARAM.sort, `${f.sort}:${f.dir}`)
   if (f.ticket) p.set(PARAM.ticket, f.ticket)

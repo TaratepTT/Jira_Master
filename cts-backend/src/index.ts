@@ -16,6 +16,7 @@ import exportRouter  from './routes/export.js'
 import healthRouter  from './routes/health.js'
 import jiraRouter    from './routes/jira.js'
 import jiraOAuthRouter from './routes/jiraOAuth.js'
+import viewsRouter from './routes/views.js'
 import { errorHandler } from './middleware/errorHandler.js'
 import { requireAuth, requireRole } from './middleware/requireAuth.js'
 import { withUserJira } from './middleware/jiraUser.js'
@@ -123,6 +124,7 @@ app.use('/api/export',  requireAuth, exportRouter)
 app.use('/api/compare', requireAuth, compareRouter)
 app.use('/api/jira',    requireAuth, requireRole('editor', 'admin'), withUserJira, jiraRouter)
 app.use('/api/jira-oauth', requireAuth, jiraOAuthRouter)
+app.use('/api/views', requireAuth, viewsRouter)
 app.use('/api/admin',   requireAuth, requireRole('admin'), adminRouter)
 app.use('/api/insights', requireAuth, insightsRouter) // GET = any user, POST = editor/admin (checked inside)
 
