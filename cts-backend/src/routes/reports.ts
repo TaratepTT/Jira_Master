@@ -172,6 +172,7 @@ router.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
         priority:           t.priority,
         ticketCreatedAt:    t.ticketCreatedAt?.toISOString() ?? null,
         resolvedAt:         t.resolvedAt?.toISOString() ?? null,
+        escalation:         t.escalation,
       })),
 
       aggregations: ag,
@@ -411,6 +412,7 @@ router.post('/:id/refresh', requireRole('editor', 'admin'), async (req: Request,
       const resolvedAt = toDate(j.resolved)
       if ((resolvedAt?.getTime() ?? null) !== (t.resolvedAt?.getTime() ?? null)) data.resolvedAt = resolvedAt
       if (!t.ticketCreatedAt && j.created) data.ticketCreatedAt = toDate(j.created)
+      if (j.escalation && j.escalation !== t.escalation) data.escalation = j.escalation
 
       // fill-only fields
       const fill = (field: 'businessUnit' | 'typeOfIssue' | 'rootCause' | 'resolution' | 'deployDate', v: string) => {

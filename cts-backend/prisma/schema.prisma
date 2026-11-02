@@ -42,6 +42,8 @@ model Ticket {
   ticketCreatedAt    DateTime? @map("ticket_created_at")
   // Jira's built-in "resolutiondate" — used for Created vs Resolved and time-to-resolve
   resolvedAt         DateTime? @map("resolved_at")
+  // Highest support level reached (L1 / L2 / L3), from the Jira status history
+  escalation         String?   @map("escalation")
 
   report Report @relation(fields: [reportId], references: [id], onDelete: Cascade)
 
@@ -151,4 +153,14 @@ model SavedView {
 
   @@index([userId])
   @@map("saved_views")
+}
+
+// Small app-wide settings edited by admins, e.g. key "sla" = target days per priority.
+model AppSetting {
+  key       String   @id
+  value     Json
+  updatedBy String?  @map("updated_by")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("app_settings")
 }

@@ -65,7 +65,8 @@ export default function HomePage() {
         actions={canEdit && (
           <>
             <Link href="/upload" className="btn">นำเข้าจากไฟล์</Link>
-            <Link href="/jira" className="btn-primary">Sync จาก Jira</Link>
+            <Link href="/jira" className="btn">Sync จาก Jira</Link>
+            <Link href="/jira?week=last" className="btn-primary" title="ดึง ticket ที่สร้างในสัปดาห์ที่แล้ว (จันทร์ถึงอาทิตย์) แล้วพาไปตรวจ บันทึก และสรุป">เริ่มรอบสัปดาห์นี้</Link>
           </>
         )}
       />

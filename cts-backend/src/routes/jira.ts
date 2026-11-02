@@ -113,6 +113,7 @@ router.post('/preview-all', async (req: Request, res: Response, next: NextFuncti
         priority:           i.priority,
         ticketCreatedAt:    i.created || null,
         resolvedAt:         i.resolved || null,
+        escalation:         i.escalation,
         problems,
         valid: problems.length === 0,
         // Only suggest when Type of Issue is genuinely empty
@@ -160,7 +161,7 @@ router.post('/confirm', async (req: Request, res: Response, next: NextFunction) 
         key: string; system: string; status: string; businessUnit: string
         typeOfIssue: string; recurringCategory?: string; standaloneCategory?: string
         summary?: string; rootCause?: string; resolution?: string; deployDate?: string
-        assignee?: string; priority?: string; ticketCreatedAt?: string | null; resolvedAt?: string | null
+        assignee?: string; priority?: string; ticketCreatedAt?: string | null; resolvedAt?: string | null; escalation?: string
       }>
     }
 
@@ -193,6 +194,7 @@ router.post('/confirm', async (req: Request, res: Response, next: NextFunction) 
               priority:           t.priority || null,
               ticketCreatedAt:    toDate(t.ticketCreatedAt),
               resolvedAt:         toDate(t.resolvedAt),
+              escalation:         /^L[123]$/.test(t.escalation ?? '') ? t.escalation : null,
             })),
           },
         },
@@ -256,6 +258,7 @@ router.post('/sync', async (req: Request, res: Response, next: NextFunction) => 
               priority:           i.priority || null,
               ticketCreatedAt:    toDate(i.created),
               resolvedAt:         toDate(i.resolved),
+              escalation:         i.escalation,
             })),
           },
         },

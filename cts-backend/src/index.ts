@@ -17,6 +17,7 @@ import healthRouter  from './routes/health.js'
 import jiraRouter    from './routes/jira.js'
 import jiraOAuthRouter from './routes/jiraOAuth.js'
 import viewsRouter from './routes/views.js'
+import settingsRouter from './routes/settings.js'
 import { errorHandler } from './middleware/errorHandler.js'
 import { requireAuth, requireRole } from './middleware/requireAuth.js'
 import { withUserJira } from './middleware/jiraUser.js'
@@ -46,7 +47,7 @@ const corsOptions: cors.CorsOptions = {
     if (ALLOWED_ORIGINS.includes(origin)) return cb(null, true)
     cb(new Error(`CORS: origin ${origin} not allowed`))
   },
-  methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true,
 }
@@ -125,6 +126,7 @@ app.use('/api/compare', requireAuth, compareRouter)
 app.use('/api/jira',    requireAuth, requireRole('editor', 'admin'), withUserJira, jiraRouter)
 app.use('/api/jira-oauth', requireAuth, jiraOAuthRouter)
 app.use('/api/views', requireAuth, viewsRouter)
+app.use('/api/settings', requireAuth, settingsRouter)
 app.use('/api/admin',   requireAuth, requireRole('admin'), adminRouter)
 app.use('/api/insights', requireAuth, insightsRouter) // GET = any user, POST = editor/admin (checked inside)
 

@@ -21,6 +21,8 @@ export interface TicketDetail {
   ticketCreatedAt?: string | null
   /** Jira "resolutiondate" — null for tickets not resolved yet (or reports synced before this field existed) */
   resolvedAt?: string | null
+  /** highest support level reached: 'L1' | 'L2' | 'L3' (null = not known yet, refresh from Jira) */
+  escalation?: string | null
 }
 
 export interface Aggregations {

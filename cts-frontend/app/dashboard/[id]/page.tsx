@@ -15,6 +15,8 @@ import BulkEditModal from '@/components/dashboard/BulkEditModal'
 import TrendChart from '@/components/dashboard/TrendChart'
 import AgingPanel from '@/components/dashboard/AgingPanel'
 import FlowPanel from '@/components/dashboard/FlowPanel'
+import EscalationPanel from '@/components/dashboard/EscalationPanel'
+import SlaPanel from '@/components/dashboard/SlaPanel'
 import BreakdownList from '@/components/dashboard/BreakdownList'
 import MultiSelectFilter from '@/components/dashboard/MultiSelectFilter'
 import SortableHeader from '@/components/dashboard/SortableHeader'
@@ -65,7 +67,7 @@ function sortTickets(list: TicketDetail[], sortKey: SortKey | null, sortDir: Sor
 // ── Main dashboard ─────────────────────────────────────────────
 export default function DashboardPage() {
   const { id } = useParams<{ id: string }>()
-  const { canEdit, user } = useAuth()
+  const { canEdit, isAdmin, user } = useAuth()
   const [bulkOpen, setBulkOpen] = useState(false)
   const [data, setData] = useState<ReportData | null>(null)
   const [error, setError] = useState('')
@@ -99,6 +101,10 @@ export default function DashboardPage() {
 
   // "แก้ในตาราง": BU / Type / Root Cause / Resolution become editable cells (saved to Jira one by one)
   const [inlineEdit, setInlineEdit] = useState(false)
+
+  // Just created from "เริ่มรอบสัปดาห์นี้" / Validate (?new=1): show what is left to do this round
+  const [isNewRound, setIsNewRound] = useState(false)
+  useEffect(() => { setIsNewRound(new URLSearchParams(window.location.search).get('new') === '1') }, [])
   const [cellStatus, setCellStatus] = useState<Record<string, CellState>>({})
 
   // Ticket modal. `fillMode` = the "ไล่กรอกข้อมูลที่ยังไม่ครบ" queue: each ticket opens in edit mode.
@@ -456,6 +462,51 @@ export default function DashboardPage() {
           </div>
         )}
 
+        {isNewRound && (
+          <section className="panel panel-pad" aria-labelledby="round-title">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h2 id="round-title" className="section-title">ขั้นต่อไปของรอบนี้</h2>
+                <p className="section-note mt-0.5">report ถูกบันทึกแล้ว เหลืออีก 3 ขั้นก่อนนำไปประชุม</p>
+              </div>
+              <button onClick={() => setIsNewRound(false)} className="btn-quiet">ซ่อน</button>
+            </div>
+            <ol className="mt-4 divide-y divide-line">
+              {[
+                {
+                  done: incompleteCount === 0,
+                  title: incompleteCount ? `กรอกข้อมูลที่ยังไม่ครบ ${incompleteCount} ใบ` : 'กรอกข้อมูลครบแล้ว',
+                  note: 'BU, Type of Issue, Root Cause, Resolution',
+                  action: incompleteCount && canEdit ? <button onClick={startFillQueue} className="btn-primary">กรอกทีละใบ</button> : null,
+                },
+                {
+                  done: false,
+                  title: 'สรุป Root Cause ที่เกิดซ้ำด้วย AI',
+                  note: 'ข้ามได้ถ้าไม่ได้เปิดใช้ AI',
+                  action: <button onClick={() => document.getElementById('root-cause-ai')?.scrollIntoView({ behavior: 'smooth' })} className="btn">ไปที่การ์ด AI</button>,
+                },
+                {
+                  done: false,
+                  title: 'เปิดหน้าสรุปสำหรับประชุม แล้วพิมพ์หรือบันทึกเป็น PDF',
+                  note: 'เทียบกับ report รอบก่อนให้อัตโนมัติ',
+                  action: <Link href={`/dashboard/${id}/summary`} className="btn">เปิดสรุป</Link>,
+                },
+              ].map((st, i) => (
+                <li key={i} className="flex flex-wrap items-center justify-between gap-3 py-3">
+                  <div className="flex items-start gap-3">
+                    <span className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border text-[11px] font-semibold num ${st.done ? 'border-ok bg-ok-soft text-ok' : 'border-line-strong text-muted'}`}>{st.done ? '✓' : i + 1}</span>
+                    <div>
+                      <p className={`text-[14px] font-medium ${st.done ? 'text-muted line-through' : ''}`}>{st.title}</p>
+                      <p className="text-[12px] text-faint">{st.note}</p>
+                    </div>
+                  </div>
+                  {!st.done && st.action}
+                </li>
+              ))}
+            </ol>
+          </section>
+        )}
+
         {/* Headline: the week in one sentence */}
         <section>
           <p className="max-w-[40rem] text-balance text-[26px] font-semibold leading-[1.35] tracking-[-0.01em] sm:text-[32px]">
@@ -554,6 +605,8 @@ export default function DashboardPage() {
           <TrendChart tickets={data.tickets} />
           <AgingPanel tickets={data.tickets} asOf={asOf} onOpenTicket={key => openTicket(key)} />
           <FlowPanel tickets={data.tickets} canRefresh={canEdit} onRefresh={handleRefresh} refreshing={refreshing} />
+          <SlaPanel tickets={data.tickets} asOf={asOf} isAdmin={isAdmin} onOpenTicket={key => openTicket(key)} />
+          <EscalationPanel tickets={data.tickets} canRefresh={canEdit} onRefresh={handleRefresh} refreshing={refreshing} />
         </section>
 
         {/* Frequency by category */}
@@ -594,7 +647,7 @@ export default function DashboardPage() {
           </div>
         </section>
 
-        <RootCauseInsights reportId={id} />
+        <div id="root-cause-ai" className="scroll-mt-20"><RootCauseInsights reportId={id} /></div>
 
         {/* Pinned tickets */}
         {highlighted.size > 0 && (

@@ -222,6 +222,17 @@ export async function deleteView(id: string): Promise<void> {
   await api.delete(`/api/views/${id}`)
 }
 
+// ── SLA: target days to resolve, per priority (admin edits) ───
+export interface SlaSettings { targets: Record<string, number>; updatedBy: string | null; updatedAt: string | null; isDefault: boolean }
+export async function getSla(): Promise<SlaSettings> {
+  const { data } = await api.get('/api/settings/sla')
+  return data as SlaSettings
+}
+export async function saveSla(targets: Record<string, number>): Promise<SlaSettings> {
+  const { data } = await api.put('/api/settings/sla', { targets })
+  return data as SlaSettings
+}
+
 // ── Per-user Jira account (Atlassian OAuth) ────────────────────
 export interface JiraConnectionStatus {
   enabled: boolean

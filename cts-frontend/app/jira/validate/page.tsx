@@ -302,7 +302,7 @@ function ValidateScreenInner() {
         reportName,
         tickets: chosen.map(({ problems, valid, suggestedCategory, carryOver, ...rest }) => rest),
       })
-      router.push(`/dashboard/${data.reportId}`)
+      router.push(`/dashboard/${data.reportId}?new=1`)
     } catch (e: unknown) {
       const msg = (e as { response?: { data?: { message?: string } } })?.response?.data?.message ?? 'บันทึกไม่สำเร็จ'
       setSaveState({ state: 'error', message: msg })

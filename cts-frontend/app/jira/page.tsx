@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import api from '@/lib/api'
 import AppShell, { PageHeader } from '@/components/layout/AppShell'
@@ -43,6 +43,22 @@ export default function JiraSyncPage() {
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo]     = useState('')
 
+  // "เริ่มรอบสัปดาห์นี้" (?week=last): last full week, Monday to Sunday
+  const [weekRound, setWeekRound] = useState(false)
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get('week') !== 'last') return
+    const d = new Date()
+    const dow = d.getDay() === 0 ? 7 : d.getDay()
+    const mon = new Date(d.getFullYear(), d.getMonth(), d.getDate() - dow - 6)
+    const sun = new Date(mon.getFullYear(), mon.getMonth(), mon.getDate() + 6)
+    const iso = (x: Date) => `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}`
+    const th = (x: Date, withYear = false) => x.toLocaleDateString('th-TH', { day: 'numeric', month: 'short', ...(withYear ? { year: 'numeric' } : {}) })
+    setDateFrom(iso(mon)); setDateTo(iso(sun))
+    setJql(`created >= "${iso(mon)}" AND created <= "${iso(sun)} 23:59" AND project = CTS ORDER BY created ASC`)
+    setReportName(`สัปดาห์ ${th(mon)} – ${th(sun, true)}`)
+    setWeekRound(true)
+  }, [])
+
   const applyDateRange = () => {
     if (!dateFrom || !dateTo) return
     const newJql = `created >= "${dateFrom}" AND created <= "${dateTo}" AND project = CTS ORDER BY created ASC`
@@ -79,6 +95,12 @@ export default function JiraSyncPage() {
       {!canEdit && (
         <p className="mb-6 rounded-lg border border-line bg-attention-soft px-4 py-3 text-[14px] text-attention">
           บัญชีของคุณมีสิทธิ์ดูอย่างเดียว จึง sync จาก Jira ไม่ได้ ขอสิทธิ์ Editor จากผู้ดูแลระบบ
+        </p>
+      )}
+
+      {weekRound && (
+        <p className="mb-4 rounded-lg border border-line bg-accent-soft px-4 py-3 text-[14px] text-ink">
+          ตั้งค่าให้แล้วสำหรับรอบสัปดาห์ที่แล้ว ({dateFrom} ถึง {dateTo}) ตรวจชื่อ report แล้วกด &quot;ดึงข้อมูลมาตรวจ&quot;
         </p>
       )}
 

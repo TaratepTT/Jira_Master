@@ -58,6 +58,8 @@ export interface JiraIssue {
   typeOfIssue:   string
   typeOfSystem:  string
   deployDate:    string
+  /** highest support level the ticket ever reached: 'L1' | 'L2' | 'L3' (from its status history) */
+  escalation:    string
 }
 
 function extractAdf(v: unknown): string {
@@ -83,6 +85,27 @@ function str(v: unknown): string {
   return String(v)
 }
 
+// Support level of a status name (L3 includes "investigate"); 0 = not a level status
+function statusLevel(name: string): number {
+  const l = (name ?? '').toLowerCase()
+  if (/\bl3\b|l3-|investigate/.test(l)) return 3
+  if (/\bl2\b|l2-/.test(l)) return 2
+  if (/\bl1\b|l1-/.test(l)) return 1
+  return 0
+}
+
+// Highest level the ticket ever reached, from the changelog when Jira sent one, otherwise
+// from the current status. Tickets that never sat in an L2/L3 status count as L1.
+export function escalationLevel(currentStatus: string, changelog?: unknown): string {
+  let max = statusLevel(currentStatus)
+  const hist = (changelog as { histories?: Array<{ items?: Array<{ field?: string; fromString?: string; toString?: string }> }> } | undefined)?.histories ?? []
+  for (const h of hist) for (const it of h.items ?? []) {
+    if (it.field !== 'status') continue
+    max = Math.max(max, statusLevel(it.fromString ?? ''), statusLevel(String(it.toString ?? '')))
+  }
+  return `L${Math.max(1, max)}`
+}
+
 function mapIssue(raw: Record<string, unknown>): JiraIssue {
   const f = raw.fields as Record<string, unknown>
   return {
@@ -101,6 +124,7 @@ function mapIssue(raw: Record<string, unknown>): JiraIssue {
     typeOfIssue:   str(f.customfield_10169),
     typeOfSystem:  str(f.customfield_10168),
     deployDate:    str(f.customfield_10185),
+    escalation:    escalationLevel(str(f.status), raw.changelog),
   }
 }
 
@@ -131,6 +155,7 @@ export async function fetchJiraIssuesWithMeta(
       jql,
       maxResults: Math.min(pageSize, maxTotal - issues.length),
       fields: FIELDS,
+      expand: 'changelog', // status history -> escalation level (L1/L2/L3)
     }
     if (nextPageToken) body.nextPageToken = nextPageToken
 
@@ -181,8 +206,15 @@ export async function fetchIssuesByKeys(keys: string[]): Promise<{ issues: JiraI
     const batch = unique.slice(i, i + BATCH)
     let page: Record<string, unknown>[] = []
     try {
-      const { data } = await jc().post('/issue/bulkfetch', { issueIdsOrKeys: batch, fields: FIELDS })
-      page = ((data as { issues?: Record<string, unknown>[] }).issues ?? [])
+      try {
+        const { data } = await jc().post('/issue/bulkfetch', { issueIdsOrKeys: batch, fields: FIELDS, expand: ['changelog'] })
+        page = ((data as { issues?: Record<string, unknown>[] }).issues ?? [])
+      } catch (e) {
+        // some sites reject expand on bulkfetch -> plain fetch (escalation then comes from the current status)
+        if ((e as { response?: { status?: number } })?.response?.status !== 400) throw e
+        const { data } = await jc().post('/issue/bulkfetch', { issueIdsOrKeys: batch, fields: FIELDS })
+        page = ((data as { issues?: Record<string, unknown>[] }).issues ?? [])
+      }
     } catch (err: unknown) {
       const status = (err as { response?: { status?: number } })?.response?.status
       if (status !== 404 && status !== 405) throw err
@@ -202,7 +234,7 @@ async function fetchByJqlTolerant(keys: string[]): Promise<Record<string, unknow
   const safe = keys.filter(k => /^[A-Z][A-Z0-9_]*-\d+$/i.test(k))
   if (!safe.length) return []
   try {
-    const { data } = await jc().post('/search/jql', { jql: `key in (${safe.join(',')})`, maxResults: safe.length, fields: FIELDS })
+    const { data } = await jc().post('/search/jql', { jql: `key in (${safe.join(',')})`, maxResults: safe.length, fields: FIELDS, expand: 'changelog' })
     return ((data as { issues?: Record<string, unknown>[] }).issues ?? [])
   } catch {
     if (safe.length === 1) return []
