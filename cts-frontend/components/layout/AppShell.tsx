@@ -33,7 +33,7 @@ export function AppNav() {
         <Link href="/" className="shrink-0 text-[15px] font-bold tracking-[-0.02em] text-ink">
           CTS<span className="font-medium text-muted"> Report</span>
         </Link>
-        <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
+        <div className="flex min-w-0 flex-1 items-stretch gap-1 self-stretch overflow-x-auto overflow-y-hidden [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           {items.filter(i => i.show).map(i => {
             const active = i.match(pathname)
             return (
@@ -41,12 +41,12 @@ export function AppNav() {
                 key={i.href}
                 href={i.href}
                 aria-current={active ? 'page' : undefined}
-                className={`relative whitespace-nowrap rounded-md px-2.5 py-1.5 text-[13px] font-medium transition-colors ${
+                className={`relative flex items-center whitespace-nowrap px-2.5 text-[13px] font-medium transition-colors ${
                   active ? 'text-ink' : 'text-muted hover:bg-sunken hover:text-ink'
                 }`}
               >
                 {i.label}
-                {active && <span className="absolute inset-x-2.5 -bottom-[7px] h-[2px] rounded-full bg-accent" aria-hidden />}
+                {active && <span className="absolute inset-x-2.5 bottom-0 h-[2px] rounded-full bg-accent" aria-hidden />}
               </Link>
             )
           })}
