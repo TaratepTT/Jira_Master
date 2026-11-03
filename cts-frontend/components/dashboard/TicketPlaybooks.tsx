@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { getTicketPlaybooks, sendTicketConfluence, sendTicketPlaybook, type ConfluencePage, type PlaybookDelivery, type PlaybookMatch } from '@/lib/api'
+import { useDialog } from '@/components/ui/Dialog'
 
 const errMsg = (e: unknown, fallback: string) =>
   (e as { response?: { data?: { message?: string } } })?.response?.data?.message ?? fallback
@@ -15,6 +16,7 @@ export default function TicketPlaybooks({ ticketKey, canSend }: { ticketKey: str
   const [pages, setPages] = useState<ConfluencePage[]>([])
   const [hasPlaybooks, setHasPlaybooks] = useState(true)
   const [busy, setBusy] = useState<string | null>(null)
+  const { confirm } = useDialog()
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null)
 
   useEffect(() => {
@@ -27,7 +29,7 @@ export default function TicketPlaybooks({ ticketKey, canSend }: { ticketKey: str
   }, [ticketKey])
 
   const send = async (m: { id: string; title: string; confluence?: boolean }) => {
-    if (!confirm(`ใส่${m.confluence ? 'ลิงก์ Confluence' : 'คู่มือ'} "${m.title}" เป็น comment ภายในของ ${ticketKey}?`)) return
+    if (!(await confirm({ title: `ส่ง${m.confluence ? 'ลิงก์ Confluence' : 'คู่มือ'}ให้ L1?`, message: `ระบบจะใส่เป็น comment ภายในของ ${ticketKey} ลูกค้าไม่เห็น`, detail: m.title, confirmLabel: 'ส่งให้ L1' }))) return
     setBusy(m.id); setMsg(null)
     try {
       if (m.confluence) await sendTicketConfluence(ticketKey, m.id)

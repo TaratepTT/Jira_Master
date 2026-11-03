@@ -7,6 +7,7 @@ import CommandPalette, { useCommandPaletteShortcut } from './CommandPalette'
 import { useAuth } from '@/components/auth/AuthContext'
 import { useTheme } from '@/components/theme/ThemeProvider'
 import { listChecks, type WatchState } from '@/lib/api'
+import { useDialog } from '@/components/ui/Dialog'
 
 // ── Icons (24px outline, drawn at 16px) ─────────────────────────
 const ICON: Record<string, string> = {
@@ -62,6 +63,7 @@ export function AppNav() {
   const { theme, toggleTheme } = useTheme()
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [drawer, setDrawer] = useState(false)
+  const { confirm } = useDialog()
   const openPalette = useCallback(() => { setDrawer(false); setPaletteOpen(true) }, [])
   const closePalette = useCallback(() => setPaletteOpen(false), [])
   useCommandPaletteShortcut(openPalette)
@@ -177,7 +179,7 @@ export function AppNav() {
           <button type="button" onClick={toggleTheme} aria-label={theme === 'light' ? 'สลับเป็นโหมดมืด' : 'สลับเป็นโหมดสว่าง'} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted transition-colors hover:bg-sunken hover:text-ink">
             <Icon name={theme === 'light' ? 'moon' : 'sun'} />
           </button>
-          <button type="button" onClick={() => { if (confirm('ออกจากระบบ?')) logout() }} title="ออกจากระบบ" aria-label="ออกจากระบบ" className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted transition-colors hover:bg-danger-soft hover:text-danger">
+          <button type="button" onClick={async () => { if (await confirm({ title: 'ออกจากระบบ?', message: 'งานที่ยังไม่ได้บันทึกในหน้านี้จะหายไป', confirmLabel: 'ออกจากระบบ' })) logout() }} title="ออกจากระบบ" aria-label="ออกจากระบบ" className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted transition-colors hover:bg-danger-soft hover:text-danger">
             <Icon name="logout" />
           </button>
         </div>

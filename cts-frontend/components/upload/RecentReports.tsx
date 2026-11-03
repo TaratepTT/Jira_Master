@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { getReports, deleteReport } from '@/lib/api'
+import { useDialog } from '@/components/ui/Dialog'
 
 interface Report {
   id: string
@@ -15,6 +16,7 @@ export default function RecentReports() {
   const [reports, setReports] = useState<Report[]>([])
   const [loading, setLoading] = useState(true)
   const [deletingId, setDeletingId] = useState<string | null>(null)
+  const { confirm, notify } = useDialog()
 
   const load = async () => {
     try {
@@ -30,13 +32,14 @@ export default function RecentReports() {
   useEffect(() => { load() }, [])
 
   const handleDelete = async (id: string) => {
-    if (!confirm('ลบ report นี้ออกจากระบบ?')) return
+    const target = reports.find(r => r.id === id)
+    if (!(await confirm({ title: 'ลบ report นี้?', message: 'ticket ทั้งหมดใน report นี้จะถูกลบออกจากระบบ ลบแล้วกู้คืนไม่ได้ (ข้อมูลใน Jira ไม่ถูกแตะ)', detail: target ? <><span className="font-medium">{target.name}</span><span className="text-muted"> · {target.totalTickets.toLocaleString()} tickets</span></> : undefined, confirmLabel: 'ลบ report', tone: 'danger' }))) return
     setDeletingId(id)
     try {
       await deleteReport(id)
       setReports((prev) => prev.filter((r) => r.id !== id))
     } catch {
-      alert('ลบไม่สำเร็จ ลองใหม่อีกครั้ง')
+      await notify({ title: 'ลบ report ไม่สำเร็จ', message: 'ลองใหม่อีกครั้ง', tone: 'danger' })
     } finally {
       setDeletingId(null)
     }

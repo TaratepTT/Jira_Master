@@ -12,6 +12,7 @@ import {
   createPlaybook, deletePlaybook, getPlaybookDelivery, listPlaybooks, setPlaybookFeedback, testPlaybooks, updatePlaybook,
   type Playbook, type PlaybookDelivery, type PlaybookInput, type PlaybookList,
 } from '@/lib/api'
+import { useDialog } from '@/components/ui/Dialog'
 
 const errMsg = (e: unknown, fallback: string) =>
   (e as { response?: { data?: { message?: string } } })?.response?.data?.message ?? fallback
@@ -334,8 +335,9 @@ function PlaybooksInner() {
   useEffect(load, [load])
 
   const [rowBusy, setRowBusy] = useState('')
+  const { confirm } = useDialog()
   const remove = async (b: Playbook) => {
-    if (!confirm(`ลบคู่มือ "${b.title}"? ประวัติการส่งยังอยู่ใน Jira`)) return
+    if (!(await confirm({ title: 'ลบคู่มือนี้?', message: 'คู่มือจะไม่ถูกแนะนำหรือส่งอีก comment ที่เคยส่งไปแล้วยังอยู่ใน Jira', detail: b.title, confirmLabel: 'ลบคู่มือ', tone: 'danger' }))) return
     setRowBusy(`del-${b.id}`)
     try { await deletePlaybook(b.id); load() } catch (e) { setError(errMsg(e, 'ลบไม่สำเร็จ')) } finally { setRowBusy('') }
   }

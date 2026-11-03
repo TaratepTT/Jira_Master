@@ -8,6 +8,7 @@ import '@fontsource-variable/geist-mono'
 import './globals.css'
 import { ThemeProvider } from '@/components/theme/ThemeProvider'
 import { AuthProvider } from '@/components/auth/AuthContext'
+import { DialogProvider } from '@/components/ui/Dialog'
 
 export const metadata: Metadata = {
   title: 'CTS Support Console',
@@ -23,7 +24,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     >
       <body className="font-sans bg-paper text-ink">
         <ThemeProvider>
-          <AuthProvider>{children}</AuthProvider>
+          <DialogProvider><AuthProvider>{children}</AuthProvider></DialogProvider>
         </ThemeProvider>
       </body>
     </html>

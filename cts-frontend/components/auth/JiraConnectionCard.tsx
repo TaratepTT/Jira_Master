@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { disconnectJira, getJiraConnection, startJiraConnection, type JiraConnectionStatus } from '@/lib/api'
+import { useDialog } from '@/components/ui/Dialog'
 
 // "เชื่อมบัญชี Jira" — when connected, everything this user does in Jira through the
 // Dashboard (edit, change status, comment) is recorded under THEIR Jira name and follows
@@ -9,6 +10,7 @@ import { disconnectJira, getJiraConnection, startJiraConnection, type JiraConnec
 export default function JiraConnectionCard({ notice }: { notice?: string }) {
   const [st, setSt] = useState<JiraConnectionStatus | null>(null)
   const [busy, setBusy] = useState(false)
+  const { confirm } = useDialog()
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(notice ? { ok: true, text: notice } : null)
 
   useEffect(() => {
@@ -27,7 +29,7 @@ export default function JiraConnectionCard({ notice }: { notice?: string }) {
   }
 
   const disconnect = async () => {
-    if (!confirm('ยกเลิกการเชื่อมบัญชี Jira? ต่อจากนี้การแก้ไขจะใช้บัญชีกลางของระบบ')) return
+    if (!(await confirm({ title: 'ยกเลิกการเชื่อมบัญชี Jira?', message: 'ต่อจากนี้การแก้ไขใน Jira จะใช้บัญชีกลางของระบบ เชื่อมใหม่ได้ทุกเมื่อ', confirmLabel: 'ยกเลิกการเชื่อม', cancelLabel: 'เชื่อมไว้ต่อ', tone: 'danger' }))) return
     setBusy(true)
     try {
       const r = await disconnectJira()

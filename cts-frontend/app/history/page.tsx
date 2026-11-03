@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { getReports, deleteReport } from '@/lib/api'
 import { useAuth } from '@/components/auth/AuthContext'
 import AppShell, { PageHeader } from '@/components/layout/AppShell'
+import { useDialog } from '@/components/ui/Dialog'
 
 interface Report { id: string; name: string; totalTickets: number; createdAt: string }
 
@@ -13,16 +14,18 @@ export default function HistoryPage() {
   const { isAdmin } = useAuth()
   const [loading, setLoading] = useState(true)
   const [deletingId, setDeletingId] = useState<string | null>(null)
+  const { confirm, notify } = useDialog()
 
   useEffect(() => {
     getReports().then(setReports).catch(() => {}).finally(() => setLoading(false))
   }, [])
 
   const handleDelete = async (id: string) => {
-    if (!confirm('ลบ report นี้?')) return
+    const target = reports.find(r => r.id === id)
+    if (!(await confirm({ title: 'ลบ report นี้?', message: 'ticket ทั้งหมดใน report นี้จะถูกลบออกจากระบบ ลบแล้วกู้คืนไม่ได้ (ข้อมูลใน Jira ไม่ถูกแตะ)', detail: target ? <><span className="font-medium">{target.name}</span><span className="text-muted"> · {target.totalTickets.toLocaleString()} tickets</span></> : undefined, confirmLabel: 'ลบ report', tone: 'danger' }))) return
     setDeletingId(id)
     try { await deleteReport(id); setReports(p => p.filter(r => r.id !== id)) }
-    catch { alert('ลบไม่สำเร็จ') }
+    catch { await notify({ title: 'ลบ report ไม่สำเร็จ', message: 'ลองใหม่อีกครั้ง', tone: 'danger' }) }
     finally { setDeletingId(null) }
   }
 

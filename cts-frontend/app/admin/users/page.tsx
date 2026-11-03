@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { useAuth } from '@/components/auth/AuthContext'
 import { listUsers, updateUser, type AppUser, type UserRole, type UserStatus } from '@/lib/api'
 import AppShell, { PageHeader } from '@/components/layout/AppShell'
+import { useDialog } from '@/components/ui/Dialog'
 
 const ROLE_OPTIONS: Array<{ value: UserRole; label: string }> = [
   { value: 'viewer', label: 'Viewer (ดูอย่างเดียว)' },
@@ -41,6 +42,7 @@ export default function AdminUsersPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [busyId, setBusyId] = useState<string | null>(null)
+  const { confirm } = useDialog()
   const [act, setAct] = useState('') // which button in the row is running
   // role chosen in the dropdown of a PENDING row, before pressing "อนุมัติ"
   const [pendingRole, setPendingRole] = useState<Record<string, UserRole>>({})
@@ -192,7 +194,7 @@ export default function AdminUsersPage() {
                                   <button
                                     disabled={busy}
                                     aria-busy={busy && act === 'reject'}
-                                    onClick={() => { if (confirm(`ปฏิเสธคำขอของ ${u.email}?`)) { setAct('reject'); patch(u, { status: 'disabled' }) } }}
+                                    onClick={async () => { if (await confirm({ title: 'ปฏิเสธคำขอสร้างบัญชี?', message: 'ผู้ใช้นี้จะเข้าสู่ระบบไม่ได้ เปิดใช้ภายหลังได้', detail: `${u.name} · ${u.email}`, confirmLabel: 'ปฏิเสธคำขอ', tone: 'danger' })) { setAct('reject'); patch(u, { status: 'disabled' }) } }}
                                     className="rounded-lg border border-line-strong px-3 py-1 text-xs font-medium text-muted hover:bg-sunken disabled:opacity-50 transition-colors"
                                   >
                                     ปฏิเสธ
@@ -203,7 +205,7 @@ export default function AdminUsersPage() {
                                 <button
                                   disabled={busy}
                                   aria-busy={busy && act === 'suspend'}
-                                  onClick={() => { if (confirm(`ระงับบัญชี ${u.email}? เขาจะถูกออกจากระบบทันที`)) { setAct('suspend'); patch(u, { status: 'disabled' }) } }}
+                                  onClick={async () => { if (await confirm({ title: 'ระงับบัญชีนี้?', message: 'ผู้ใช้จะถูกออกจากระบบทันทีและเข้าใหม่ไม่ได้ จนกว่าจะเปิดใช้อีกครั้ง', detail: `${u.name} · ${u.email}`, confirmLabel: 'ระงับบัญชี', tone: 'danger' })) { setAct('suspend'); patch(u, { status: 'disabled' }) } }}
                                   className="rounded-lg border border-line px-3 py-1 text-xs font-medium text-danger hover:bg-danger-soft disabled:opacity-50 transition-colors"
                                 >
                                   ระงับ

@@ -7,6 +7,7 @@ import {
   listChecks, recheckTicket, runChecks, sendTicketConfluence, sendTicketPlaybook,
   type CheckCandidate, type CheckDecision, type TicketCheck, type WatchState,
 } from '@/lib/api'
+import { useDialog } from '@/components/ui/Dialog'
 
 const errMsg = (e: unknown, fallback: string) =>
   (e as { response?: { data?: { message?: string } } })?.response?.data?.message ?? fallback
@@ -32,6 +33,7 @@ export default function TicketChecks({ canEdit, onChanged }: { canEdit: boolean;
   const [open, setOpen] = useState<string | null>(null)
   const [filter, setFilter] = useState<Filter>('all')
   const [busy, setBusy] = useState<string | null>(null)
+  const { confirm } = useDialog()
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null)
 
   const load = useCallback(async () => {
@@ -56,7 +58,7 @@ export default function TicketChecks({ canEdit, onChanged }: { canEdit: boolean;
     catch (e) { setMsg({ ok: false, text: errMsg(e, 'ตรวจไม่สำเร็จ') }) } finally { setBusy(null) }
   }
   const send = async (key: string, c: CheckCandidate) => {
-    if (!confirm(`ใส่${c.kind === 'confluence' ? 'ลิงก์ Confluence' : 'คู่มือ'} "${c.title}" เป็น comment ภายในของ ${key}?`)) return
+    if (!(await confirm({ title: `ส่ง${c.kind === 'confluence' ? 'ลิงก์ Confluence' : 'คู่มือ'}ให้ L1?`, message: `ระบบจะใส่เป็น comment ภายในของ ${key} ลูกค้าไม่เห็น`, detail: c.title, confirmLabel: 'ส่งให้ L1' }))) return
     setBusy(`send-${key}-${c.id}`); setMsg(null)
     try {
       if (c.kind === 'confluence') await sendTicketConfluence(key, c.id); else await sendTicketPlaybook(key, c.id)

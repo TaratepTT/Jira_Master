@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { createView, deleteView, listViews, type SavedView } from '@/lib/api'
+import { useDialog } from '@/components/ui/Dialog'
 
 // "มุมมอง" — saved sets of table filters. A view stores only filters (not the report),
 // so the same view works on every week's report.
@@ -13,6 +14,7 @@ export default function ViewsMenu({
 }) {
   const [open, setOpen] = useState(false)
   const [views, setViews] = useState<SavedView[] | null>(null)
+  const { confirm } = useDialog()
   const [name, setName] = useState('')
   const [shared, setShared] = useState(false)
   const [error, setError] = useState('')
@@ -48,7 +50,7 @@ export default function ViewsMenu({
   }
 
   const remove = async (v: SavedView) => {
-    if (!confirm(`ลบมุมมอง "${v.name}"?`)) return
+    if (!(await confirm({ title: 'ลบมุมมองนี้?', message: v.shared ? 'คนในทีมที่ใช้มุมมองนี้จะไม่เห็นอีก' : undefined, detail: v.name, confirmLabel: 'ลบมุมมอง', tone: 'danger' }))) return
     try {
       await deleteView(v.id)
       setViews(list => (list ?? []).filter(x => x.id !== v.id))

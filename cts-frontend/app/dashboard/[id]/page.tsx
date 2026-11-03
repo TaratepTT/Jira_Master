@@ -26,6 +26,7 @@ import type { ReportData, SortDir, SortKey, TicketDetail } from '@/components/da
 import {
   TYPE_OF_ISSUE_OPTIONS, formatDate, isClosedStatus, isIncomplete, jiraBrowseUrl, openTicketAges, pct, statusBadge,
 } from '@/components/dashboard/utils'
+import { useDialog } from '@/components/ui/Dialog'
 
 // The dashboard of one report. Sub-components live in components/dashboard/*:
 //   TicketDetailModal (edit + sync to Jira) · TicketActivityPanel (comments/history/files)
@@ -73,6 +74,7 @@ export default function DashboardPage() {
   const [error, setError] = useState('')
   const [highlighted, setHighlighted] = useState<Set<string>>(new Set())
   const [exportingCsv, setExportingCsv] = useState(false)
+  const { notify } = useDialog()
 
   // Filters, sort and the open ticket live in the address bar (shareable links) — lib/useUrlFilters.ts
   const [filters, setFilters] = useUrlFilters()
@@ -364,7 +366,7 @@ export default function DashboardPage() {
       link.remove()
       window.URL.revokeObjectURL(url)
     } catch {
-      alert('Export CSV ไม่สำเร็จ — กรุณา login ใหม่หรือลองอีกครั้ง')
+      await notify({ title: 'Export CSV ไม่สำเร็จ', message: 'ลองอีกครั้ง ถ้ายังไม่ได้ให้ออกจากระบบแล้วเข้าใหม่', tone: 'danger' })
     } finally {
       setExportingCsv(false)
     }
