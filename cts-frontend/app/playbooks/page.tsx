@@ -148,14 +148,16 @@ function ConfluencePanel({ status, stats, isAdmin, onSaved }: { status: Confluen
   const [min, setMin] = useState(String(Math.round(st.minScore * 100)))
   const [links, setLinks] = useState(String(st.maxLinks))
   const [spaces, setSpaces] = useState(st.spaces.join(', '))
+  const rootsText = (st.roots ?? []).map(r => r.title).join('\n')
+  const [roots, setRoots] = useState(rootsText)
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null)
   const [busy, setBusy] = useState(false)
-  useEffect(() => { setAuto(st.autoSend); setMin(String(Math.round(st.minScore * 100))); setLinks(String(st.maxLinks)); setSpaces(st.spaces.join(', ')) }, [st.autoSend, st.minScore, st.maxLinks, st.spaces])
+  useEffect(() => { setAuto(st.autoSend); setMin(String(Math.round(st.minScore * 100))); setLinks(String(st.maxLinks)); setSpaces(st.spaces.join(', ')); setRoots(rootsText) }, [st.autoSend, st.minScore, st.maxLinks, st.spaces, rootsText])
 
   const save = async () => {
     setBusy(true); setMsg(null)
     try {
-      await saveConfluenceSettings({ autoSend: auto, minScore: Number(min) / 100, maxLinks: Number(links), spaces: spaces.split(',').map(x => x.trim()).filter(Boolean) })
+      await saveConfluenceSettings({ autoSend: auto, minScore: Number(min) / 100, maxLinks: Number(links), spaces: spaces.split(',').map(x => x.trim()).filter(Boolean), roots: roots.split('\n').map(x => x.trim()).filter(Boolean) })
       setMsg({ ok: true, text: 'บันทึกแล้ว' }); onSaved()
     } catch (e) { setMsg({ ok: false, text: errMsg(e, 'บันทึกไม่สำเร็จ') }) } finally { setBusy(false) }
   }
@@ -185,6 +187,9 @@ function ConfluencePanel({ status, stats, isAdmin, onSaved }: { status: Confluen
         <>
           <p className="mt-2 text-[13px] text-muted">
             เชื่อมกับ <span className="key">{status.site}</span>, ค้นใน space {st.spaces.length ? st.spaces.map(x => <span key={x} className="key mx-0.5">{x}</span>) : 'ทุก space ที่บัญชีนี้เห็น'}
+            {(st.roots ?? []).length > 0
+              ? <> เฉพาะหน้าใต้ {st.roots.map((r, i) => <span key={r.id}>{i > 0 && ', '}<a href={r.url} target="_blank" rel="noreferrer" className="text-accent hover:underline">{r.title}</a></span>)}</>
+              : <span className="text-attention"> ทุกหน้าใน space (ยังไม่ได้จำกัดหน้า)</span>}
             {stats.sent > 0 && <> · ส่งไปแล้ว {stats.sent} ครั้ง, L1 บอกว่าตรง {stats.helpful} ไม่ตรง {stats.wrong}{stats.knownLevel ? `, จบที่ L1 ${Math.round((stats.stayedL1 / stats.knownLevel) * 100)}%` : ''}</>}
           </p>
           {isAdmin && (
@@ -206,6 +211,9 @@ function ConfluencePanel({ status, stats, isAdmin, onSaved }: { status: Confluen
                   <input value={spaces} onChange={e => setSpaces(e.target.value)} className="field mt-1 w-48" placeholder="ANLTS" />
                 </label>
               </div>
+              <label className="mt-3 block text-[12px] text-muted">ค้นเฉพาะหน้าที่อยู่ใต้หน้านี้ (รวมหน้าลูกทุกชั้น) ใส่ชื่อหน้าหรือลิงก์ บรรทัดละหน้า เว้นว่าง = ทุกหน้าใน space
+                <textarea value={roots} onChange={e => setRoots(e.target.value)} rows={2} className="field mt-1 resize-y" placeholder="Tech Knowledge and Solution" aria-label="หน้าหลักที่ให้ค้น" />
+              </label>
               <div className="mt-3 flex flex-wrap items-center gap-2">
                 <button onClick={save} disabled={busy} className="btn-primary">บันทึกการตั้งค่า</button>
                 <button onClick={check} disabled={busy} className="btn">ทดสอบการเชื่อมต่อ</button>

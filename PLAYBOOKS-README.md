@@ -95,6 +95,20 @@ If no playbook written in the app matches, the system searches Confluence using 
 - **In the ticket window**: the pages found are listed with a "ส่งลิงก์ให้ L1" button (for editors). Only pages the search actually returned for that ticket can be sent.
 - **Feedback and stats**: work the same as for playbooks ("Confluence: …" in the "ส่งล่าสุด" list).
 
+### Search only under one page (e.g. "Tech Knowledge and Solution")
+
+Without a limit, the system searches every page in the space. That includes Tech Support pages, which are not manuals.
+
+To limit it:
+1. Go to คู่มือ L1 → "ค้นคู่มือจาก Confluence อัตโนมัติ".
+2. In the "ค้นเฉพาะหน้าที่อยู่ใต้หน้านี้" field, type `Tech Knowledge and Solution`. A link to the page also works.
+3. Press "บันทึกการตั้งค่า".
+
+From then on, search and page-reading only cover that page and its child pages at every level (CQL `ancestor in (...)`).
+- Several roots can be entered, one per line.
+- If two pages share the same title, paste the page link instead.
+- Tickets already checked before the limit was set: press "ตรวจใหม่" to see the new result.
+
 ### Confluence environment variables on Render
 
 Confluence is on `anls.atlassian.net`, a different site from Jira (`ascendcommerce-support.atlassian.net`), so it needs its own credentials:

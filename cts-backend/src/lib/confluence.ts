@@ -11,7 +11,9 @@ import { normalizeText, similarity, textGrams } from './similar.js'
 //   CONFLUENCE_SPACES     optional default space keys, e.g. ANLTS (admin can change in the app)
 // ══════════════════════════════════════════════════════════════
 
-export interface ConfluenceSettings { autoSend: boolean; minScore: number; maxLinks: number; spaces: string[] }
+export interface RootPage { id: string; title: string; url: string }
+/** roots: only search these pages and everything under them (empty = whole space) */
+export interface ConfluenceSettings { autoSend: boolean; minScore: number; maxLinks: number; spaces: string[]; roots: RootPage[] }
 export interface ConfluencePage { id: string; title: string; url: string; excerpt: string; space: string; score: number; matched: string[]; reasons?: string[]; checked?: boolean }
 
 const baseUrl = () => (process.env.CONFLUENCE_BASE_URL ?? '').trim().replace(/\/+$/, '').replace(/\/wiki$/, '')
@@ -19,7 +21,7 @@ export const confluenceConfigured = () => !!(baseUrl() && process.env.CONFLUENCE
 export const confluenceSite = () => baseUrl()
 
 const envSpaces = () => (process.env.CONFLUENCE_SPACES ?? '').split(',').map(s => s.trim()).filter(Boolean)
-export const DEFAULT_CONFLUENCE: ConfluenceSettings = { autoSend: false, minScore: 0.5, maxLinks: 2, spaces: [] }
+export const DEFAULT_CONFLUENCE: ConfluenceSettings = { autoSend: false, minScore: 0.5, maxLinks: 2, spaces: [], roots: [] }
 
 export async function readConfluenceSettings(): Promise<ConfluenceSettings & { updatedBy: string | null }> {
   try {
@@ -31,6 +33,7 @@ export async function readConfluenceSettings(): Promise<ConfluenceSettings & { u
         minScore: typeof v.minScore === 'number' ? v.minScore : DEFAULT_CONFLUENCE.minScore,
         maxLinks: typeof v.maxLinks === 'number' ? v.maxLinks : DEFAULT_CONFLUENCE.maxLinks,
         spaces: Array.isArray(v.spaces) && v.spaces.length ? v.spaces.map(String) : envSpaces(),
+        roots: Array.isArray(v.roots) ? v.roots.filter(r => r && typeof r.id === 'string').map(r => ({ id: String(r.id), title: String(r.title ?? ''), url: String(r.url ?? '') })) : [],
         updatedBy: row.updatedBy,
       }
     }
@@ -107,14 +110,17 @@ export async function searchConfluence(summary: string, description = '', spaces
   if (!confluenceConfigured()) return []
   const terms = searchTerms(summary, description)
   if (!terms.length) return []
-  const sp = spaces ?? (await readConfluenceSettings()).spaces
-  const ck = `${sp.join(',')}|${terms.join(' ')}`
+  const settings = await readConfluenceSettings()
+  const sp = spaces ?? settings.spaces
+  const roots = settings.roots.map(r => r.id).filter(id => /^\d+$/.test(id))
+  const ck = `${sp.join(',')}|${roots.join(',')}|${terms.join(' ')}`
   const hit = cache.get(ck)
   if (hit && Date.now() - hit.at < 5 * 60_000) return hit.pages.slice(0, limit)
 
   const words = terms.map(cqlQuote).filter(w => w !== '""')
   const any = words.flatMap(w => [`title ~ ${w}`, `text ~ ${w}`]).join(' OR ')
-  const cql = `type = page${sp.length ? ` AND space in (${sp.map(cqlQuote).join(',')})` : ''} AND (${any})`
+  const under = roots.length ? ` AND (ancestor in (${roots.join(',')}) OR id in (${roots.join(',')}))` : ''
+  const cql = `type = page${sp.length ? ` AND space in (${sp.map(cqlQuote).join(',')})` : ''}${under} AND (${any})`
   const { data } = await cf().get('/search', { params: { cql, limit: 25, excerpt: 'highlight' } })
   type R = { title?: string; excerpt?: string; url?: string; content?: { id?: string; title?: string; _links?: { webui?: string }; space?: { key?: string } }; resultGlobalContainer?: { title?: string } }
   const results = ((data as { results?: R[] }).results ?? [])
@@ -237,4 +243,33 @@ export async function confluenceCandidates(summary: string, description = '', sp
     }
   }))
   return checked.sort((a, b) => b.score - a.score).slice(0, limit)
+}
+
+/**
+ * Turn what the admin typed (a page link, a page id, or an exact page title) into a page.
+ * Title lookup is limited to the chosen spaces.
+ */
+export async function resolveRootPage(input: string, spaces: string[]): Promise<RootPage | { error: string }> {
+  const raw = input.trim()
+  if (!raw) return { error: 'ว่าง' }
+  const idFromUrl = /\/pages\/(\d+)/.exec(raw)?.[1] ?? /[?&]pageId=(\d+)/.exec(raw)?.[1] ?? (/^\d+$/.test(raw) ? raw : null)
+  try {
+    if (idFromUrl) {
+      const { data } = await cf().get(`/content/${idFromUrl}`)
+      const d = data as { id?: string; title?: string; _links?: { webui?: string } }
+      if (!d?.id) return { error: `ไม่พบหน้า ${raw}` }
+      return { id: String(d.id), title: String(d.title ?? ''), url: `${baseUrl()}/wiki${d._links?.webui ?? ''}` }
+    }
+    const cql = `type = page AND title = ${cqlQuote(raw)}${spaces.length ? ` AND space in (${spaces.map(cqlQuote).join(',')})` : ''}`
+    const { data } = await cf().get('/search', { params: { cql, limit: 5 } })
+    type R = { content?: { id?: string; title?: string; _links?: { webui?: string } } }
+    const hits = ((data as { results?: R[] }).results ?? []).filter(r => r.content?.id)
+    if (!hits.length) return { error: `ไม่พบหน้าชื่อ "${raw}"${spaces.length ? ` ใน space ${spaces.join(', ')}` : ''} (ลองวางลิงก์ของหน้าแทน)` }
+    if (hits.length > 1) return { error: `มีหลายหน้าชื่อ "${raw}" ให้วางลิงก์ของหน้าที่ต้องการแทน` }
+    const c = hits[0].content!
+    return { id: String(c.id), title: String(c.title ?? raw), url: `${baseUrl()}/wiki${c._links?.webui ?? ''}` }
+  } catch (err) {
+    const st = (err as { response?: { status?: number } })?.response?.status
+    return { error: st === 404 ? `ไม่พบหน้า ${raw}` : `เปิดหน้า ${raw} ไม่ได้${st ? ` (HTTP ${st})` : ''}` }
+  }
 }

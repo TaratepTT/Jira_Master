@@ -7,7 +7,7 @@ import {
   AUTO_MIN_SCORE, composeComment, composeConfluenceComment, decisionText, isConfluenceDelivery, loadPlaybooks, matchPlaybooks,
   processTicket, sendConfluencePages, sendPlaybook, type PlaybookRow,
 } from '../lib/playbooks.js'
-import { confluenceCandidates, confluenceConfigured, confluenceSite, readConfluenceSettings, testConfluenceConnection, type ConfluencePage } from '../lib/confluence.js'
+import { confluenceCandidates, confluenceConfigured, confluenceSite, readConfluenceSettings, resolveRootPage, testConfluenceConnection, type ConfluencePage, type RootPage } from '../lib/confluence.js'
 import { runWatchOnce, watchState } from '../lib/watcher.js'
 import { findSimilar, knownTickets } from '../lib/similar.js'
 
@@ -288,14 +288,30 @@ router.put('/confluence/settings', async (req: AuthedRequest, res: Response, nex
     const spacesRaw = Array.isArray(b.spaces) ? b.spaces : String(b.spaces ?? '').split(',')
     const spaces = spacesRaw.map(x => String(x).trim().toUpperCase()).filter(Boolean)
     if (spaces.some(x => !/^~?[A-Z0-9_]{1,64}$/.test(x))) { res.status(400).json({ message: 'space key ใช้ได้แค่ A–Z, 0–9 และ _' }); return }
-    const value = { autoSend: b.autoSend === true, minScore: Math.round(minScore * 100) / 100, maxLinks, spaces }
+    // roots: page links / titles / ids; resolve new ones, keep already-resolved ones as they are
+    const before0 = await readConfluenceSettings()
+    // roots left out = keep the current ones
+    const rawRoots = b.roots === undefined ? before0.roots.map(r => r.id) : Array.isArray(b.roots) ? b.roots : String(b.roots ?? '').split('\n')
+    const rootInputs = rawRoots
+      .map(x => (x && typeof x === 'object' && 'id' in (x as object) ? String((x as RootPage).id) : String(x ?? '').trim()))
+      .filter(Boolean).slice(0, 10)
+    const roots: RootPage[] = []
+    for (const input of rootInputs) {
+      const known = before0.roots.find(r => r.id === input || r.title === input || r.url === input)
+      if (known) { if (!roots.some(x => x.id === known.id)) roots.push(known); continue }
+      if (!confluenceConfigured()) { res.status(400).json({ message: 'ยังไม่ได้เชื่อม Confluence จึงตรวจหน้าไม่ได้' }); return }
+      const r = await resolveRootPage(input, spaces)
+      if ('error' in r) { res.status(400).json({ message: r.error }); return }
+      if (!roots.some(x => x.id === r.id)) roots.push(r)
+    }
+    const value = { autoSend: b.autoSend === true, minScore: Math.round(minScore * 100) / 100, maxLinks, spaces, roots: roots.map(r => ({ id: r.id, title: r.title, url: r.url })) }
     const before = await readConfluenceSettings()
     await prisma.appSetting.upsert({
       where: { key: 'confluence' },
       create: { key: 'confluence', value, updatedBy: req.user.name },
       update: { value, updatedBy: req.user.name },
     })
-    await recordAudit(req.user, { action: 'settings.confluence', summary: `ตั้งค่าค้น Confluence: ${value.autoSend ? 'ส่งอัตโนมัติ' : 'ไม่ส่งอัตโนมัติ'}, เกณฑ์ ${Math.round(value.minScore * 100)}%`, details: { before, after: value } })
+    await recordAudit(req.user, { action: 'settings.confluence', summary: `ตั้งค่าค้น Confluence: ${value.autoSend ? 'ส่งอัตโนมัติ' : 'ไม่ส่งอัตโนมัติ'}, เกณฑ์ ${Math.round(value.minScore * 100)}%${roots.length ? `, เฉพาะใต้ ${roots.map(r => r.title).join(', ')}` : ''}`, details: { before, after: value } })
     res.json({ configured: confluenceConfigured(), site: confluenceSite() || null, settings: await readConfluenceSettings() })
   } catch (err) {
     const m = errMsg(err); if (m) { res.status(503).json({ message: m }); return }
