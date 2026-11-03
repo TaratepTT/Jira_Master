@@ -164,3 +164,42 @@ model AppSetting {
 
   @@map("app_settings")
 }
+
+// คู่มือสำหรับ L1: when a new ticket matches, the steps + Confluence link are posted to the
+// ticket as an INTERNAL comment (agents only — customers on the portal never see it).
+model Playbook {
+  id            String   @id @default(uuid())
+  title         String
+  confluenceUrl String?  @map("confluence_url")
+  steps         String   // what L1 should do, one step per line
+  keywords      String   // comma separated, matched against the ticket summary (+ description)
+  typeOfIssue   String?  @map("type_of_issue")   // optional extra condition
+  system        String?                          // optional extra condition (CMP / VMP / CP TMS)
+  enabled       Boolean  @default(true)
+  autoSend      Boolean  @default(false) @map("auto_send") // post by itself when a new ticket is created
+  createdBy     String   @map("created_by")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  @@map("playbooks")
+}
+
+// One row per manual written to a ticket (auto or by a person). ticketKey is unique per
+// playbook so the same manual is never posted twice to the same ticket.
+model PlaybookDelivery {
+  id         String   @id @default(uuid())
+  playbookId String   @map("playbook_id") // a playbook id, or "confluence:<pageId>" for a Confluence search hit
+  ticketKey  String   @map("ticket_key")
+  mode       String   // auto | manual
+  score      Float
+  sentBy     String   @map("sent_by")
+  feedback   String?  // helpful | wrong
+  feedbackBy String?  @map("feedback_by")
+  /// Confluence search deliveries: [{ id, title, url }] of the pages put in the comment
+  pages      Json?
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@unique([playbookId, ticketKey])
+  @@index([ticketKey])
+  @@map("playbook_deliveries")
+}

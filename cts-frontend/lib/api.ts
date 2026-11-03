@@ -511,3 +511,64 @@ export async function compareReportsApi(baseId: string, currentId: string): Prom
 }
 
 export default api
+
+// ── คู่มือ L1 (playbooks): matched to new tickets, sent as an internal Jira comment ──
+export interface Playbook {
+  id: string; title: string; confluenceUrl: string | null; steps: string; keywords: string
+  typeOfIssue: string | null; system: string | null; enabled: boolean; autoSend: boolean
+  createdBy: string; createdAt: string; updatedAt: string
+}
+export type PlaybookInput = Pick<Playbook, 'title' | 'confluenceUrl' | 'steps' | 'keywords' | 'typeOfIssue' | 'system' | 'enabled' | 'autoSend'>
+export interface PlaybookStats { id: string; sent: number; auto: number; helpful: number; wrong: number; knownLevel: number; stayedL1: number; lastSentAt: string | null }
+export interface PlaybookDelivery {
+  id: string; playbookId: string; ticketKey: string; mode: 'auto' | 'manual'; score: number; sentBy: string
+  feedback: 'helpful' | 'wrong' | null; feedbackBy: string | null; createdAt: string; title: string; escalation?: string | null
+  pages?: Array<{ id: string; title: string; url: string }> | null
+}
+export interface PlaybookMatch { playbookId: string; title: string; score: number; reasons: string[]; autoSend?: boolean; confluenceUrl?: string | null }
+export interface ConfluencePage { id: string; title: string; url: string; excerpt: string; space: string; score: number; matched: string[] }
+export interface ConfluenceSettings { autoSend: boolean; minScore: number; maxLinks: number; spaces: string[]; updatedBy?: string | null }
+export interface ConfluenceStatus { configured: boolean; site: string | null; settings: ConfluenceSettings }
+export interface ConfluenceResult { configured: boolean; pages: ConfluencePage[]; error?: string; minScore?: number; autoSend?: boolean }
+export interface PlaybookList {
+  playbooks: Playbook[]; stats: PlaybookStats[]; recent: PlaybookDelivery[]; autoMinScore: number; webhookEnabled: boolean
+  confluence: ConfluenceStatus & { stats: Omit<PlaybookStats, 'id' | 'lastSentAt'> }
+}
+
+export async function listPlaybooks(): Promise<PlaybookList> {
+  const { data } = await api.get('/api/playbooks'); return data as PlaybookList
+}
+export async function createPlaybook(p: PlaybookInput): Promise<Playbook> {
+  const { data } = await api.post('/api/playbooks', p); return data as Playbook
+}
+export async function updatePlaybook(id: string, p: PlaybookInput): Promise<Playbook> {
+  const { data } = await api.put(`/api/playbooks/${id}`, p); return data as Playbook
+}
+export async function deletePlaybook(id: string): Promise<void> {
+  await api.delete(`/api/playbooks/${id}`)
+}
+export async function testPlaybooks(t: { summary: string; description?: string; typeOfIssue?: string; system?: string }): Promise<PlaybookTestResult> {
+  const { data } = await api.post('/api/playbooks/test', t); return data
+}
+export interface PlaybookTestResult { matches: PlaybookMatch[]; confluence: ConfluenceResult; preview: unknown; wouldAutoSend: boolean; wouldSend: 'playbook' | 'confluence' | null }
+export async function getTicketPlaybooks(key: string): Promise<{ matches: PlaybookMatch[]; confluence: ConfluenceResult; sent: PlaybookDelivery[]; hasPlaybooks: boolean; setupNeeded?: string }> {
+  const { data } = await api.get(`/api/playbooks/ticket/${encodeURIComponent(key)}`); return data
+}
+export async function sendTicketPlaybook(key: string, playbookId: string): Promise<{ deliveryId: string; title: string }> {
+  const { data } = await api.post(`/api/playbooks/ticket/${encodeURIComponent(key)}/send`, { playbookId }); return data
+}
+export async function getPlaybookDelivery(id: string): Promise<PlaybookDelivery> {
+  const { data } = await api.get(`/api/playbooks/deliveries/${encodeURIComponent(id)}`); return data as PlaybookDelivery
+}
+export async function setPlaybookFeedback(id: string, feedback: 'helpful' | 'wrong' | null): Promise<PlaybookDelivery> {
+  const { data } = await api.patch(`/api/playbooks/deliveries/${encodeURIComponent(id)}`, { feedback }); return data as PlaybookDelivery
+}
+export async function sendTicketConfluence(key: string, pageId: string): Promise<{ deliveryId: string; title: string }> {
+  const { data } = await api.post(`/api/playbooks/ticket/${encodeURIComponent(key)}/confluence`, { pageId }); return data
+}
+export async function saveConfluenceSettings(s: Omit<ConfluenceSettings, 'updatedBy'>): Promise<ConfluenceStatus> {
+  const { data } = await api.put('/api/playbooks/confluence/settings', s); return data as ConfluenceStatus
+}
+export async function checkConfluence(): Promise<{ ok: boolean; message: string }> {
+  const { data } = await api.post('/api/playbooks/confluence/check'); return data
+}

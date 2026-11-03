@@ -22,6 +22,7 @@ export function AppNav() {
     { href: '/', label: 'Reports', match: p => p === '/' || p.startsWith('/dashboard') || p.startsWith('/history'), show: true },
     { href: '/jira', label: 'Sync จาก Jira', match: p => p.startsWith('/jira') || p.startsWith('/upload'), show: canEdit },
     { href: '/compare', label: 'เปรียบเทียบ', match: p => p.startsWith('/compare'), show: true },
+    { href: '/playbooks', label: 'คู่มือ L1', match: p => p.startsWith('/playbooks'), show: true },
     { href: '/admin/users', label: 'ผู้ใช้', match: p => p.startsWith('/admin/users'), show: isAdmin },
     { href: '/admin/audit', label: 'ประวัติการใช้งาน', match: p => p.startsWith('/admin/audit'), show: isAdmin },
   ]

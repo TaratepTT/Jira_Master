@@ -8,6 +8,7 @@ import {
 import { useAuth } from '@/components/auth/AuthContext'
 import TicketActivityPanel from './TicketActivityPanel'
 import SimilarTickets from './SimilarTickets'
+import TicketPlaybooks from './TicketPlaybooks'
 import type { TicketDetail } from './types'
 import { TYPE_OF_ISSUE_OPTIONS, formatDate, jiraBrowseUrl, missingFields, statusBadge, toDateInput } from './utils'
 
@@ -597,6 +598,8 @@ export default function TicketDetailModal({
             canUse={canEdit}
             onUse={applyFromSimilar}
           />
+
+          <TicketPlaybooks ticketKey={ticket.key} canSend={canEdit} />
 
           <TicketActivityPanel reportId={reportId} ticketKey={ticket.key} />
 

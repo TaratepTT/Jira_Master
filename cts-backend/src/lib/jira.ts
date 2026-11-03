@@ -1026,3 +1026,65 @@ export async function downloadJiraAttachment(
 }
 
 
+
+// ══════════════════════════════════════════════════════════════
+// ── PLAYBOOKS — read a new ticket, post an INTERNAL comment ─────
+// ══════════════════════════════════════════════════════════════
+
+export interface PlaybookTicket { key: string; summary: string; description: string; typeOfIssue: string; system: string; status: string; created: string }
+
+function adfAllText(v: unknown): string {
+  if (!v) return ''
+  if (typeof v === 'string') return v
+  const out: string[] = []
+  const walk = (n: unknown) => {
+    if (!n || typeof n !== 'object') return
+    const o = n as { text?: unknown; content?: unknown }
+    if (typeof o.text === 'string') out.push(o.text)
+    if (Array.isArray(o.content)) o.content.forEach(walk)
+  }
+  walk(v)
+  return out.join(' ').replace(/\s+/g, ' ').trim()
+}
+
+export async function fetchTicketForPlaybook(key: string): Promise<PlaybookTicket | null> {
+  try {
+    const { data } = await jc().get(`/issue/${encodeURIComponent(key)}`, {
+      params: { fields: 'summary,description,status,issuetype,created,customfield_10169' },
+    })
+    const f = (data as { key?: string; fields?: Record<string, unknown> }).fields ?? {}
+    return {
+      key: String((data as { key?: string }).key ?? key),
+      summary: str(f.summary),
+      description: adfAllText(f.description).slice(0, 4000),
+      typeOfIssue: str(f.customfield_10169),
+      system: str(f.issuetype),
+      status: str(f.status),
+      created: str(f.created),
+    }
+  } catch (err) {
+    const status = (err as { response?: { status?: number } })?.response?.status
+    if (status === 404) return null
+    throw err
+  }
+}
+
+/** Keys of tickets created in the last `hours` hours (for the sweeper that catches missed webhooks) */
+export async function recentTicketKeys(jqlProject: string, hours: number): Promise<string[]> {
+  const { data } = await jc().post('/search/jql', {
+    jql: `project = ${jqlProject} AND created >= -${Math.max(1, Math.round(hours * 60))}m ORDER BY created DESC`,
+    maxResults: 100,
+    fields: ['summary'],
+  })
+  return ((data as { issues?: Array<{ key: string }> }).issues ?? []).map(i => i.key)
+}
+
+// Jira Service Management: the "sd.public.comment" property with internal=true makes the comment
+// visible to agents only — customers on the portal never see it.
+export async function addInternalComment(key: string, adfBody: unknown): Promise<string> {
+  const { data } = await jc().post(`/issue/${encodeURIComponent(key)}/comment`, {
+    body: adfBody,
+    properties: [{ key: 'sd.public.comment', value: { internal: true } }],
+  })
+  return String((data as { id?: string })?.id ?? '')
+}
