@@ -32,6 +32,7 @@ const config: Config = {
         'danger-soft': v('danger-soft'),
         ok: v('ok'),
         'ok-soft': v('ok-soft'),
+        sidebar: v('sidebar'),
       },
       fontFamily: {
         sans: ['var(--font-sans)', 'ui-sans-serif', 'system-ui', 'sans-serif'],

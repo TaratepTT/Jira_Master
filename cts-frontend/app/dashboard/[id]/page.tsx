@@ -382,7 +382,7 @@ export default function DashboardPage() {
   if (!data) return (
     <div className="min-h-screen bg-paper">
       <AppNav />
-      <div className="mx-auto max-w-[1200px] px-4 sm:px-8 py-10 space-y-4">
+      <div className="mx-auto max-w-[1240px] px-4 sm:px-8 py-10 space-y-4">
         <div className="h-9 w-2/3 rounded bg-sunken animate-pulse" />
         <div className="h-20 rounded bg-sunken animate-pulse" />
         <div className="h-64 rounded bg-sunken animate-pulse" />
@@ -423,7 +423,7 @@ export default function DashboardPage() {
     <div className="min-h-screen bg-paper text-ink">
       <AppNav />
 
-      <main className="mx-auto max-w-[1200px] px-4 py-8 sm:px-8 space-y-10">
+      <main className="mx-auto max-w-[1240px] px-4 py-8 sm:px-8 lg:py-10 space-y-10">
         <PageHeader
           back={{ href: '/', label: 'Reports' }}
           title={name}

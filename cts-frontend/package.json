@@ -9,8 +9,9 @@
     "lint": "next lint"
   },
   "dependencies": {
-    "@fontsource/ibm-plex-mono": "^5.3.0",
-    "@fontsource/ibm-plex-sans-thai": "^5.3.0",
+    "@fontsource-variable/anuphan": "^5.3.0",
+    "@fontsource-variable/geist": "^5.3.0",
+    "@fontsource-variable/geist-mono": "^5.3.0",
     "axios": "^1.7.2",
     "next": "14.2.5",
     "react": "^18",

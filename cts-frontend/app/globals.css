@@ -3,54 +3,60 @@
 @tailwind utilities;
 
 /* ── Design tokens ───────────────────────────────────────────────
-   One calm neutral base, one accent (petrol teal) for actions and
-   links, and three reserved state colours: attention (amber — waiting,
-   missing data), danger (red — L3 / errors), ok (green — closed).
-   Dark mode uses its own steps, not an inverted light theme. */
+   Cool neutral canvas, one cobalt accent for actions, links and the current place in the app,
+   and three reserved state colours: attention (amber: waiting, missing data), danger (red: L3,
+   errors), ok (green: closed, sent). Dark mode has its own steps, not an inverted light theme.
+   Radius follows hierarchy: 4px chips, 6px controls, 10px panels, 14px dialogs. */
 :root {
-  --paper: #f7f7f5;
+  --paper: #f5f6f8;
   --surface: #ffffff;
-  --sunken: #f1f1ee;
-  --ink: #1b1f23;
-  --muted: #646a73;
-  --faint: #8d939b;
-  --line: #e3e3df;
-  --line-strong: #cfcfca;
-  --accent: #006a7a;
-  --accent-strong: #00515e;
-  --accent-soft: #e3f1f3;
+  --sunken: #f0f2f5;
+  --ink: #171a21;
+  --muted: #5b6372;
+  --faint: #878f9c;
+  --line: #e4e7ec;
+  --line-strong: #cfd4dc;
+  --accent: #2d5be3;
+  --accent-strong: #1f46c0;
+  --accent-soft: #ebf0fe;
   --on-accent: #ffffff;
-  --chart-a: #0089a3;
-  --chart-b: #b45309;
-  --attention: #a15c07;
-  --attention-soft: #fbf1e2;
-  --danger: #b42318;
-  --danger-soft: #fcebea;
-  --ok: #1e7b4e;
-  --ok-soft: #e6f4ec;
+  --chart-a: #2d5be3;
+  --chart-b: #d07a1f;
+  --attention: #a95806;
+  --attention-soft: #fdf3e6;
+  --danger: #c22f2a;
+  --danger-soft: #fdecec;
+  --ok: #187a51;
+  --ok-soft: #e6f4ed;
+  --sidebar: #fbfbfc;
+  --ring: rgba(45, 91, 227, 0.22);
+  --shadow-pop: 0 1px 2px rgba(16, 24, 40, 0.06), 0 12px 32px -8px rgba(16, 24, 40, 0.18);
   color-scheme: light;
 }
 .dark {
-  --paper: #121518;
-  --surface: #1b1f23;
-  --sunken: #16191c;
-  --ink: #e6e8ea;
-  --muted: #9aa1a9;
-  --faint: #6f767e;
-  --line: #2c3238;
-  --line-strong: #3a4148;
-  --accent: #4dbccd;
-  --accent-strong: #7ad0dd;
-  --accent-soft: #12323a;
-  --on-accent: #0b2a30;
-  --chart-a: #14a3ba;
-  --chart-b: #d97706;
-  --attention: #e7a54b;
-  --attention-soft: #33260f;
-  --danger: #f07468;
-  --danger-soft: #3a1d1a;
-  --ok: #5cc08c;
-  --ok-soft: #15301f;
+  --paper: #0e1116;
+  --surface: #151a21;
+  --sunken: #11151b;
+  --ink: #e8ebf0;
+  --muted: #9aa3b2;
+  --faint: #6b7484;
+  --line: #242b35;
+  --line-strong: #333c48;
+  --accent: #7c9bff;
+  --accent-strong: #a3b8ff;
+  --accent-soft: #1a2547;
+  --on-accent: #0b1430;
+  --chart-a: #6e8fff;
+  --chart-b: #f0a04b;
+  --attention: #f0b35c;
+  --attention-soft: #33240e;
+  --danger: #f27a72;
+  --danger-soft: #3a1b1b;
+  --ok: #5cc796;
+  --ok-soft: #12301f;
+  --sidebar: #12161c;
+  --ring: rgba(124, 155, 255, 0.28);
+  --shadow-pop: 0 1px 2px rgba(0, 0, 0, 0.4), 0 16px 40px -8px rgba(0, 0, 0, 0.6);
   color-scheme: dark;
 }
 
@@ -60,11 +66,21 @@
     -moz-osx-font-smoothing: grayscale;
   }
   body {
-    font-feature-settings: 'tnum' 0;
+    font-size: 14px;
+    line-height: 1.55;
+    font-feature-settings: 'ss01' 0, 'cv11' 1;
+    text-rendering: optimizeLegibility;
   }
+  h1, h2, h3 { letter-spacing: -0.011em; }
   :focus-visible {
     outline: 2px solid var(--accent);
     outline-offset: 2px;
+    border-radius: 4px;
+  }
+  ::selection { background: var(--accent-soft); color: var(--ink); }
+  /* the sidebar is fixed; push every signed-in page over on wide screens */
+  @media (min-width: 1024px) {
+    body:has(#app-sidebar) { padding-left: 248px; }
   }
 }
 
@@ -87,35 +103,40 @@
   button[aria-busy="true"]:disabled { opacity: 0.8; }
 
   /* surfaces */
-  .panel { @apply rounded-lg border border-line bg-surface; }
-  .panel-pad { @apply p-5; }
-  .section-title { @apply text-[15px] font-semibold text-ink; }
-  .section-note { @apply text-[13px] text-muted; }
+  .panel { @apply rounded-[10px] border border-line bg-surface; }
+  .panel-pad { @apply p-5 sm:p-6; }
+  .section-title { @apply text-[15px] font-semibold leading-snug tracking-[-0.01em] text-ink; }
+  .section-note { @apply text-[13px] leading-relaxed text-muted; }
+  .pop { box-shadow: var(--shadow-pop); }
 
   /* numbers line up in columns */
   .num { font-variant-numeric: tabular-nums; }
   /* ticket keys are identifiers — monospace so they scan and compare well */
-  .key { font-family: var(--font-mono); font-size: 0.92em; letter-spacing: -0.01em; }
+  .key { font-family: var(--font-mono); font-size: 0.9em; letter-spacing: 0; font-feature-settings: 'zero' 1; }
 
-  /* buttons */
+  /* buttons: 32px tall, 6px radius */
   .btn {
-    @apply inline-flex items-center justify-center gap-1.5 rounded-md border border-line-strong bg-surface px-3 py-1.5 text-[13px] font-medium text-ink transition-colors hover:bg-sunken disabled:cursor-not-allowed disabled:opacity-50;
+    @apply inline-flex h-8 items-center justify-center gap-1.5 whitespace-nowrap rounded-md border border-line-strong bg-surface px-3 text-[13px] font-medium text-ink transition-colors hover:border-faint hover:bg-sunken disabled:cursor-not-allowed disabled:opacity-50;
   }
   .btn-primary {
-    @apply inline-flex items-center justify-center gap-1.5 rounded-md bg-accent px-3 py-1.5 text-[13px] font-medium text-on-accent transition-colors hover:bg-accent-strong disabled:cursor-not-allowed disabled:opacity-50;
+    @apply inline-flex h-8 items-center justify-center gap-1.5 whitespace-nowrap rounded-md bg-accent px-3 text-[13px] font-medium text-on-accent transition-colors hover:bg-accent-strong disabled:cursor-not-allowed disabled:opacity-50;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14), 0 1px 2px rgba(16, 24, 40, 0.12);
   }
   .btn-quiet {
-    @apply inline-flex items-center gap-1 rounded-md px-2 py-1 text-[13px] font-medium text-muted transition-colors hover:bg-sunken hover:text-ink;
+    @apply inline-flex h-7 items-center gap-1 whitespace-nowrap rounded-md px-2 text-[13px] font-medium text-muted transition-colors hover:bg-sunken hover:text-ink;
   }
-  .link { @apply text-accent hover:underline underline-offset-2; }
+  .btn.py-1, .btn-primary.py-1 { @apply h-7; }
+  .link { @apply text-accent underline-offset-2 hover:underline; }
 
   /* form controls */
   .field {
-    @apply w-full rounded-md border border-line-strong bg-surface px-2.5 py-1.5 text-[13px] text-ink outline-none transition-colors placeholder:text-faint focus:border-accent;
+    @apply w-full rounded-md border border-line-strong bg-surface px-2.5 py-1.5 text-[13px] text-ink outline-none transition-[border-color,box-shadow] placeholder:text-faint hover:border-faint focus:border-accent;
   }
+  .field:focus { box-shadow: 0 0 0 3px var(--ring); }
+  input.field, select.field { @apply h-8 py-0; }
 
   /* status chip: neutral by default; closed = ok, L3 = danger */
-  .chip { @apply inline-flex max-w-full items-center truncate rounded px-1.5 py-0.5 text-[12px] font-medium leading-tight; }
+  .chip { @apply inline-flex max-w-full items-center truncate rounded border border-line bg-sunken px-1.5 py-0.5 text-[12px] font-medium leading-tight text-muted; }
 }
 
 @media (prefers-reduced-motion: reduce) {

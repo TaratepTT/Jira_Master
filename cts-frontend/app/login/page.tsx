@@ -29,7 +29,7 @@ export default function LoginPage() {
 
       <div className="w-full max-w-sm">
         <div className="mb-8">
-          <p className="text-[15px] font-bold tracking-[-0.02em] text-ink">CTS<span className="font-medium text-muted"> Report</span></p>
+          <p className="flex items-center gap-2.5"><span className="flex h-7 w-7 items-center justify-center rounded-md bg-accent text-[13px] font-bold tracking-[-0.03em] text-on-accent" aria-hidden>C</span><span className="text-[15px] font-semibold tracking-[-0.01em] text-ink">CTS Report</span></p>
           <h1 className="mt-6 text-[24px] font-semibold leading-tight text-ink">เข้าสู่ระบบ</h1>
           <p className="mt-1 text-[14px] text-muted">รายงาน ticket ของทีม Tech Support จาก Jira</p>
         </div>

@@ -18,9 +18,9 @@ export function pct(n: number, total: number) { return total ? Math.round(n / to
 // "almost done" (Resolved / CLOSING, accent) get a colour, so colour still means something.
 export function statusBadge(s: string) {
   const l = (s ?? '').toLowerCase()
-  if (l.includes('closed') || l.includes('done')) return 'bg-ok-soft text-ok'
-  if (l.includes('l3') || l.includes('invest')) return 'bg-danger-soft text-danger'
-  if (l.includes('resolved') || l.includes('closing')) return 'bg-accent-soft text-accent'
+  if (l.includes('closed') || l.includes('done')) return 'border-transparent bg-ok-soft text-ok'
+  if (l.includes('l3') || l.includes('invest')) return 'border-transparent bg-danger-soft text-danger'
+  if (l.includes('resolved') || l.includes('closing')) return 'border-transparent bg-accent-soft text-accent'
   if (l.includes('cancel') || l.includes('reject')) return 'bg-sunken text-faint'
   return 'bg-sunken text-muted'
 }

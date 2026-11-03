@@ -346,7 +346,7 @@ function ValidateScreenInner() {
   return (
     <div className="min-h-screen bg-paper text-ink">
       <AppNav />
-      <main className="mx-auto max-w-[1200px] px-4 py-8 sm:px-8 space-y-6">
+      <main className="mx-auto max-w-[1240px] px-4 py-8 sm:px-8 lg:py-10 space-y-6">
         <PageHeader
           back={{ href: '/jira', label: 'แก้เงื่อนไขการ sync' }}
           title="ตรวจข้อมูลก่อนบันทึก"
