@@ -1,5 +1,6 @@
 'use client'
 
+import Spinner from '@/components/ui/Spinner'
 import { Suspense, useEffect, useRef, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
@@ -36,7 +37,7 @@ function JiraCallbackInner() {
             <Link href="/account" className="text-sm text-accent hover:underline">กลับไปหน้าบัญชีของฉัน</Link>
           </>
         ) : (
-          <p className="text-sm text-muted">กำลังเชื่อมบัญชี Jira...</p>
+          <p className="flex items-center justify-center gap-2 text-sm text-muted"><Spinner />กำลังเชื่อมบัญชี Jira...</p>
         )}
       </div>
     </div>

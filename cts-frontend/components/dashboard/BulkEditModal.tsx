@@ -131,13 +131,7 @@ export default function BulkEditModal({ reportId, tickets, typeOptions, onClose,
               <p className="text-[11px] text-muted">การแก้ไขนี้เขียนลง Jira จริงและย้อนกลับอัตโนมัติไม่ได้ · ระบบบันทึกชื่อคุณใน audit log</p>
             </div>
             <div className="flex items-center gap-2">
-              <button onClick={run} disabled={running} className="flex-1 flex items-center justify-center gap-2 rounded-lg bg-accent py-2 text-sm font-medium text-on-accent hover:bg-accent-strong disabled:opacity-60 transition-colors">
-                {running && (
-                  <svg className="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                  </svg>
-                )}
+              <button onClick={run} disabled={running} aria-busy={running} className="flex-1 flex items-center justify-center gap-2 rounded-lg bg-accent py-2 text-sm font-medium text-on-accent hover:bg-accent-strong disabled:opacity-60 transition-colors">
                 {running ? 'กำลังแก้ไขและ sync ไป Jira...' : 'ยืนยันและแก้ไข'}
               </button>
               <button onClick={() => setStep('form')} disabled={running} className="rounded-lg border border-line-strong px-4 py-2 text-sm font-medium text-muted hover:bg-sunken disabled:opacity-50 transition-colors">กลับ</button>

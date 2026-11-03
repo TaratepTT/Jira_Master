@@ -115,7 +115,7 @@ export default function JiraSyncPage() {
               {testState.state === 'error' && <span className="text-danger">เชื่อมต่อไม่ได้: {testState.message}</span>}
             </p>
           </div>
-          <button onClick={testConnection} disabled={isBusy} className="btn">
+          <button onClick={testConnection} disabled={isBusy} aria-busy={testState.state === 'testing'} className="btn">
             {testState.state === 'testing' ? 'กำลังทดสอบ...' : 'ทดสอบการเชื่อมต่อ'}
           </button>
         </section>

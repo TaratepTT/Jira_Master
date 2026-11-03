@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
+import Spinner from '@/components/ui/Spinner'
 
 export type CellState = { state: 'saving' } | { state: 'saved' } | { state: 'error'; message: string }
 
@@ -86,7 +87,7 @@ export default function InlineCell({
           role={status.state === 'error' ? 'alert' : undefined}
           title={status.state === 'error' ? status.message : undefined}
         >
-          {status.state === 'saving' ? 'กำลังบันทึกลง Jira' : status.state === 'saved' ? 'บันทึกแล้ว' : 'บันทึกไม่สำเร็จ'}
+          {status.state === 'saving' ? <span className="inline-flex items-center gap-1"><Spinner />กำลังบันทึกลง Jira</span> : status.state === 'saved' ? 'บันทึกแล้ว' : 'บันทึกไม่สำเร็จ'}
         </p>
       )}
     </div>

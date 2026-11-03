@@ -138,6 +138,7 @@ export default function HomePage() {
                         <button
                           onClick={() => handleDelete(r.id)}
                           disabled={deletingId === r.id}
+                          aria-busy={deletingId === r.id}
                           aria-label={`ลบ ${r.name}`}
                           className="btn-quiet hover:bg-danger-soft hover:text-danger disabled:opacity-40"
                         >

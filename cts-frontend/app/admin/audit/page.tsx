@@ -111,7 +111,7 @@ export default function AdminAuditPage() {
                 placeholder="ค้นหา ticket key / ชื่อ / อีเมล แล้วกด Enter"
                 className="flex-1 min-w-[220px] rounded-lg border border-line-strong bg-surface px-3 py-1.5 text-xs text-ink outline-none focus:border-accent"
               />
-              <button onClick={load} className="rounded-lg border border-line-strong px-3 py-1.5 text-xs font-medium text-muted hover:bg-sunken transition-colors">รีเฟรช</button>
+              <button onClick={load} disabled={loading} aria-busy={loading} className="rounded-lg border border-line-strong px-3 py-1.5 text-xs font-medium text-muted hover:bg-sunken transition-colors">รีเฟรช</button>
             </div>
 
             {error && (

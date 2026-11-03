@@ -25,8 +25,10 @@ function FeedbackCard({ id, onDone }: { id: string; onDone: () => void }) {
   const [d, setD] = useState<PlaybookDelivery | null>(null)
   const [error, setError] = useState('')
   useEffect(() => { getPlaybookDelivery(id).then(setD).catch(e => setError(errMsg(e, 'ไม่พบรายการนี้'))) }, [id])
+  const [giving, setGiving] = useState<'' | 'helpful' | 'wrong'>('')
   const give = async (f: 'helpful' | 'wrong') => {
-    try { setD(await setPlaybookFeedback(id, f)); onDone() } catch (e) { setError(errMsg(e, 'บันทึกไม่สำเร็จ')) }
+    setGiving(f)
+    try { setD(await setPlaybookFeedback(id, f)); onDone() } catch (e) { setError(errMsg(e, 'บันทึกไม่สำเร็จ')) } finally { setGiving('') }
   }
   if (error) return <div className="panel panel-pad mb-6 text-[14px] text-danger">{error}</div>
   if (!d) return <div className="panel mb-6 h-24 animate-pulse" />
@@ -38,8 +40,8 @@ function FeedbackCard({ id, onDone }: { id: string; onDone: () => void }) {
       <p className="mt-1 text-[16px] font-semibold">{d.title}</p>
       <p className="mt-3 text-[14px]">คู่มือนี้ตรงกับเรื่องของ ticket ไหม</p>
       <div className="mt-2 flex flex-wrap items-center gap-2">
-        <button onClick={() => give('helpful')} className={d.feedback === 'helpful' ? 'btn-primary' : 'btn'}>ตรง ช่วยได้</button>
-        <button onClick={() => give('wrong')} className={d.feedback === 'wrong' ? 'btn-primary' : 'btn'}>ไม่ตรงเรื่อง</button>
+        <button onClick={() => give('helpful')} disabled={!!giving} aria-busy={giving === 'helpful'} className={d.feedback === 'helpful' ? 'btn-primary' : 'btn'}>ตรง ช่วยได้</button>
+        <button onClick={() => give('wrong')} disabled={!!giving} aria-busy={giving === 'wrong'} className={d.feedback === 'wrong' ? 'btn-primary' : 'btn'}>ไม่ตรงเรื่อง</button>
         {d.feedback && <span className="text-[13px] text-ok">บันทึกแล้ว ขอบคุณครับ</span>}
       </div>
       <p className="mt-3 text-[12px] text-faint">ใช้ปรับคำค้นของคู่มือ คู่มือที่ถูกบอกว่าไม่ตรงบ่อย ๆ ควรแก้ keyword หรือปิดการส่งอัตโนมัติ</p>
@@ -116,7 +118,7 @@ function Editor({ initial, onSaved, onCancel }: { initial: Playbook | null; onSa
       </div>
       {error && <p className="mt-3 text-[13px] text-danger">{error}</p>}
       <div className="mt-4 flex gap-2">
-        <button onClick={save} disabled={saving || !f.title.trim()} className="btn-primary">{saving ? 'กำลังบันทึก...' : 'บันทึกคู่มือ'}</button>
+        <button onClick={save} disabled={saving || !f.title.trim()} aria-busy={saving} className="btn-primary">{saving ? 'กำลังบันทึก...' : 'บันทึกคู่มือ'}</button>
         <button onClick={onCancel} className="btn-quiet">ยกเลิก</button>
       </div>
     </div>
@@ -151,19 +153,19 @@ function ConfluencePanel({ status, stats, isAdmin, onSaved }: { status: Confluen
   const rootsText = (st.roots ?? []).map(r => r.title).join('\n')
   const [roots, setRoots] = useState(rootsText)
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null)
-  const [busy, setBusy] = useState(false)
+  const [busy, setBusy] = useState<'' | 'save' | 'check'>('')
   useEffect(() => { setAuto(st.autoSend); setMin(String(Math.round(st.minScore * 100))); setLinks(String(st.maxLinks)); setSpaces(st.spaces.join(', ')); setRoots(rootsText) }, [st.autoSend, st.minScore, st.maxLinks, st.spaces, rootsText])
 
   const save = async () => {
-    setBusy(true); setMsg(null)
+    setBusy('save'); setMsg(null)
     try {
       await saveConfluenceSettings({ autoSend: auto, minScore: Number(min) / 100, maxLinks: Number(links), spaces: spaces.split(',').map(x => x.trim()).filter(Boolean), roots: roots.split('\n').map(x => x.trim()).filter(Boolean) })
       setMsg({ ok: true, text: 'บันทึกแล้ว' }); onSaved()
-    } catch (e) { setMsg({ ok: false, text: errMsg(e, 'บันทึกไม่สำเร็จ') }) } finally { setBusy(false) }
+    } catch (e) { setMsg({ ok: false, text: errMsg(e, 'บันทึกไม่สำเร็จ') }) } finally { setBusy('') }
   }
   const check = async () => {
-    setBusy(true); setMsg(null)
-    try { const r = await checkConfluence(); setMsg({ ok: r.ok, text: r.message }) } catch (e) { setMsg({ ok: false, text: errMsg(e, 'ตรวจไม่สำเร็จ') }) } finally { setBusy(false) }
+    setBusy('check'); setMsg(null)
+    try { const r = await checkConfluence(); setMsg({ ok: r.ok, text: r.message }) } catch (e) { setMsg({ ok: false, text: errMsg(e, 'ตรวจไม่สำเร็จ') }) } finally { setBusy('') }
   }
 
   return (
@@ -215,8 +217,8 @@ function ConfluencePanel({ status, stats, isAdmin, onSaved }: { status: Confluen
                 <textarea value={roots} onChange={e => setRoots(e.target.value)} rows={2} className="field mt-1 resize-y" placeholder="Tech Knowledge and Solution" aria-label="หน้าหลักที่ให้ค้น" />
               </label>
               <div className="mt-3 flex flex-wrap items-center gap-2">
-                <button onClick={save} disabled={busy} className="btn-primary">บันทึกการตั้งค่า</button>
-                <button onClick={check} disabled={busy} className="btn">ทดสอบการเชื่อมต่อ</button>
+                <button onClick={save} disabled={!!busy} aria-busy={busy === 'save'} className="btn-primary">บันทึกการตั้งค่า</button>
+                <button onClick={check} disabled={!!busy} aria-busy={busy === 'check'} className="btn">ทดสอบการเชื่อมต่อ</button>
                 {msg && <span className={`text-[13px] ${msg.ok ? 'text-ok' : 'text-danger'}`}>{msg.text}</span>}
               </div>
               <p className="mt-2 text-[12px] text-faint">แนะนำให้ลองกับ ticket สมมติด้านล่างหลาย ๆ แบบก่อนเปิดส่งอัตโนมัติ ถ้าเจอลิงก์ผิดบ่อยให้เพิ่มความตรงขั้นต่ำ</p>
@@ -234,9 +236,10 @@ function Tester({ minScore }: { minScore: number }) {
   const [description, setDescription] = useState('')
   const [r, setR] = useState<PlaybookTestResult | null>(null)
   const [error, setError] = useState('')
+  const [running, setRunning] = useState(false)
   const run = async () => {
-    setError('')
-    try { setR(await testPlaybooks({ summary, description })) } catch (e) { setError(errMsg(e, 'ทดสอบไม่สำเร็จ')) }
+    setError(''); setRunning(true)
+    try { setR(await testPlaybooks({ summary, description })) } catch (e) { setError(errMsg(e, 'ทดสอบไม่สำเร็จ')) } finally { setRunning(false) }
   }
   return (
     <div className="panel panel-pad">
@@ -247,7 +250,7 @@ function Tester({ minScore }: { minScore: number }) {
           <input value={summary} onChange={e => setSummary(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && summary.trim()) run() }}
             className="field" placeholder="summary เช่น รถทะเบียน 1กก-1234 GPS ไม่อัปเดต" aria-label="summary ที่จะทดสอบ" />
           <textarea value={description} onChange={e => setDescription(e.target.value)} rows={3} className="field resize-y" placeholder="รายละเอียด (ไม่ใส่ก็ได้)" aria-label="รายละเอียด" />
-          <button onClick={run} disabled={!summary.trim()} className="btn">ทดสอบ</button>
+          <button onClick={run} disabled={!summary.trim() || running} aria-busy={running} className="btn">{running ? 'กำลังค้นและอ่านหน้า Confluence' : 'ทดสอบ'}</button>
           {error && <p className="text-[13px] text-danger">{error}</p>}
           {r && (
             <div className="space-y-3 pt-2" data-testid="tester-result">
@@ -308,12 +311,15 @@ function PlaybooksInner() {
   }, [])
   useEffect(load, [load])
 
+  const [rowBusy, setRowBusy] = useState('')
   const remove = async (b: Playbook) => {
     if (!confirm(`ลบคู่มือ "${b.title}"? ประวัติการส่งยังอยู่ใน Jira`)) return
-    try { await deletePlaybook(b.id); load() } catch (e) { setError(errMsg(e, 'ลบไม่สำเร็จ')) }
+    setRowBusy(`del-${b.id}`)
+    try { await deletePlaybook(b.id); load() } catch (e) { setError(errMsg(e, 'ลบไม่สำเร็จ')) } finally { setRowBusy('') }
   }
   const toggleAuto = async (b: Playbook) => {
-    try { await updatePlaybook(b.id, { ...b, autoSend: !b.autoSend }); load() } catch (e) { setError(errMsg(e, 'บันทึกไม่สำเร็จ')) }
+    setRowBusy(`auto-${b.id}`)
+    try { await updatePlaybook(b.id, { ...b, autoSend: !b.autoSend }); load() } catch (e) { setError(errMsg(e, 'บันทึกไม่สำเร็จ')) } finally { setRowBusy('') }
   }
 
   return (
@@ -382,7 +388,7 @@ function PlaybooksInner() {
                     <td className="px-2 py-2.5 text-right num">{s?.knownLevel ? `${Math.round((s.stayedL1 / s.knownLevel) * 100)}% (${s.stayedL1}/${s.knownLevel})` : <span className="text-faint">—</span>}</td>
                     <td className="px-2 py-2.5">
                       {!b.enabled ? 'ปิดอยู่' : canEdit ? (
-                        <button onClick={() => toggleAuto(b)} className="btn-quiet -ml-2" title="กดเพื่อสลับ">
+                        <button onClick={() => toggleAuto(b)} disabled={!!rowBusy} aria-busy={rowBusy === `auto-${b.id}`} className="btn-quiet -ml-2" title="กดเพื่อสลับ">
                           {b.autoSend ? 'อัตโนมัติ' : 'กดส่งเอง'}
                         </button>
                       ) : b.autoSend ? 'อัตโนมัติ' : 'กดส่งเอง'}
@@ -390,7 +396,7 @@ function PlaybooksInner() {
                     <td className="whitespace-nowrap px-4 py-2.5 text-right">
                       {canEdit && <>
                         <button onClick={() => setEditing(b)} className="btn-quiet">แก้</button>
-                        <button onClick={() => remove(b)} className="btn-quiet text-danger">ลบ</button>
+                        <button onClick={() => remove(b)} disabled={!!rowBusy} aria-busy={rowBusy === `del-${b.id}`} className="btn-quiet text-danger">ลบ</button>
                       </>}
                     </td>
                   </tr>

@@ -2,6 +2,7 @@
 
 import { Fragment, useCallback, useEffect, useState } from 'react'
 import { jiraBrowseUrl } from '@/components/dashboard/utils'
+import Spinner from '@/components/ui/Spinner'
 import {
   listChecks, recheckTicket, runChecks, sendTicketConfluence, sendTicketPlaybook,
   type CheckCandidate, type CheckDecision, type TicketCheck, type WatchState,
@@ -73,14 +74,14 @@ export default function TicketChecks({ canEdit, onChanged }: { canEdit: boolean;
         <div className="min-w-0">
           <h2 className="section-title">ticket ใหม่ที่ระบบตรวจแล้ว</h2>
           <p className="section-note mt-0.5">
-            {!watch ? 'กำลังโหลด' : !watch.enabled ? 'ตัวดึง ticket ปิดอยู่ (ต้องมี JIRA_API_TOKEN บน server และไม่ได้ตั้ง PLAYBOOK_WATCH=off)'
+            {!watch ? <><Spinner /> กำลังโหลด</> : !watch.enabled ? 'ตัวดึง ticket ปิดอยู่ (ต้องมี JIRA_API_TOKEN บน server และไม่ได้ตั้ง PLAYBOOK_WATCH=off)'
               : <>ระบบดึง ticket ใหม่จาก Jira เองทุก {Math.max(1, Math.round(watch.intervalMs / 60000))} นาที แล้วเปิดหน้า Confluence ที่ค้นเจอมาเทียบกับเนื้อหา ticket
                 {watch.lastRunAt && <> · ตรวจล่าสุด {fmtTime(watch.lastRunAt)}</>}</>}
           </p>
           {watch?.lastError && <p className="mt-1 text-[13px] text-danger">{watch.lastError}</p>}
         </div>
         {canEdit && watch?.enabled && (
-          <button onClick={pull} disabled={busy !== null} className="btn shrink-0">{busy === 'pull' ? 'กำลังดึง...' : 'ดึง ticket ใหม่ตอนนี้'}</button>
+          <button onClick={pull} disabled={busy !== null} aria-busy={busy === 'pull'} className="btn shrink-0">{busy === 'pull' ? 'กำลังดึง...' : 'ดึง ticket ใหม่ตอนนี้'}</button>
         )}
       </div>
 
@@ -137,7 +138,7 @@ export default function TicketChecks({ canEdit, onChanged }: { canEdit: boolean;
                           {cands.length > 0 && (
                             <button onClick={() => setOpen(expanded ? null : c.ticketKey)} aria-expanded={expanded} className="btn-quiet">{expanded ? 'ซ่อน' : 'ดูผล'}</button>
                           )}
-                          {canEdit && <button onClick={() => recheck(c.ticketKey)} disabled={busy !== null} className="btn-quiet">{busy === `re-${c.ticketKey}` ? 'กำลังตรวจ...' : 'ตรวจใหม่'}</button>}
+                          {canEdit && <button onClick={() => recheck(c.ticketKey)} disabled={busy !== null} aria-busy={busy === `re-${c.ticketKey}`} className="btn-quiet">{busy === `re-${c.ticketKey}` ? 'กำลังตรวจ...' : 'ตรวจใหม่'}</button>}
                         </td>
                       </tr>
                       {expanded && (
@@ -156,7 +157,7 @@ export default function TicketChecks({ canEdit, onChanged }: { canEdit: boolean;
                                   </span>
                                   {isSent(c, cand) ? <span className="shrink-0 text-[12px] text-ok">ส่งแล้ว</span>
                                     : canEdit && (
-                                      <button onClick={() => send(c.ticketKey, cand)} disabled={busy !== null} className="btn shrink-0 py-1">
+                                      <button onClick={() => send(c.ticketKey, cand)} disabled={busy !== null} aria-busy={busy === `send-${c.ticketKey}-${cand.id}`} className="btn shrink-0 py-1">
                                         {busy === `send-${c.ticketKey}-${cand.id}` ? 'กำลังส่ง...' : 'ส่งให้ L1'}
                                       </button>
                                     )}

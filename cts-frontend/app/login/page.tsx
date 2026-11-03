@@ -69,6 +69,7 @@ export default function LoginPage() {
           <button
             type="submit"
             disabled={loading}
+            aria-busy={loading}
             className="btn-primary w-full py-2.5 text-[14px]"
           >
             {loading ? 'กำลังเข้าสู่ระบบ...' : 'เข้าสู่ระบบ'}

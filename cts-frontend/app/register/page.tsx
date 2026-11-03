@@ -80,7 +80,7 @@ export default function RegisterPage() {
                 </div>
               )}
 
-              <button type="submit" disabled={loading} className="btn-primary w-full py-2.5 text-[14px]">
+              <button type="submit" disabled={loading} aria-busy={loading} className="btn-primary w-full py-2.5 text-[14px]">
                 {loading ? 'กำลังสมัคร...' : 'สมัครสมาชิก'}
               </button>
             </form>

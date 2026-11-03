@@ -41,7 +41,7 @@ export default function EscalationPanel({
         <div className="mt-4 rounded-md border border-dashed border-line-strong p-5 text-center">
           <p className="text-[14px] text-muted">report นี้ยังไม่มีประวัติสถานะของ ticket</p>
           {canRefresh
-            ? <button onClick={onRefresh} disabled={refreshing} className="btn-primary mt-3">{refreshing ? 'กำลังดึงจาก Jira...' : 'รีเฟรชจาก Jira เพื่อดึงประวัติสถานะ'}</button>
+            ? <button onClick={onRefresh} disabled={refreshing} aria-busy={refreshing} className="btn-primary mt-3">{refreshing ? 'กำลังดึงจาก Jira...' : 'รีเฟรชจาก Jira เพื่อดึงประวัติสถานะ'}</button>
             : <p className="mt-2 text-[12px] text-faint">ให้ผู้มีสิทธิ์ editor กด "รีเฟรชจาก Jira"</p>}
         </div>
       ) : (

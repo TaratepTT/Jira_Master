@@ -164,6 +164,7 @@ export default function FlowPanel({
             <button
               onClick={onRefresh}
               disabled={refreshing}
+              aria-busy={refreshing}
               className="mt-3 rounded-lg bg-accent px-3 py-1.5 text-xs font-medium text-on-accent hover:bg-accent-strong disabled:opacity-50"
             >
               {refreshing ? 'กำลังดึงจาก Jira...' : 'รีเฟรชจาก Jira เพื่อดึงวันที่ resolve'}

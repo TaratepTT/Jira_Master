@@ -6,6 +6,7 @@ import { createPortal } from 'react-dom'
 import { getReports, searchTickets, type TicketHit } from '@/lib/api'
 import { useAuth } from '@/components/auth/AuthContext'
 import { useTheme } from '@/components/theme/ThemeProvider'
+import Spinner from '@/components/ui/Spinner'
 
 // ── Ctrl+K / ⌘K : jump to a ticket, a report, a page, or run a command ──
 // Typing a key like "CTS-17110" (or just "17110") finds that ticket in its latest report.
@@ -132,7 +133,7 @@ export default function CommandPalette({ open, onClose }: { open: boolean; onClo
             aria-controls="palette-list"
             className="h-12 w-full bg-transparent text-[15px] text-ink outline-none placeholder:text-faint"
           />
-          {searching && <span className="text-[12px] text-faint">กำลังค้นหา</span>}
+          {searching && <span className="flex shrink-0 items-center gap-1.5 text-[12px] text-faint"><Spinner />กำลังค้นหา</span>}
         </div>
         <ul id="palette-list" role="listbox" className="max-h-[50vh] overflow-y-auto py-1">
           {items.length === 0 && (

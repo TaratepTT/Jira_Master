@@ -8,6 +8,7 @@ import {
 import { useAuth } from '@/components/auth/AuthContext'
 import TicketActivityPanel from './TicketActivityPanel'
 import SimilarTickets from './SimilarTickets'
+import Spinner from '@/components/ui/Spinner'
 import TicketPlaybooks from './TicketPlaybooks'
 import type { TicketDetail } from './types'
 import { TYPE_OF_ISSUE_OPTIONS, formatDate, jiraBrowseUrl, missingFields, statusBadge, toDateInput } from './utils'
@@ -361,7 +362,7 @@ export default function TicketDetailModal({
                         <option key={st} value={st}>{`${st} (ผ่านคิว ${queuedPaths[st].length} ขั้น)`}</option>
                       ))}
                   </select>
-                  {allowedStatuses === null && <p className="mt-1 text-[11px] text-faint">กำลังดึงสถานะที่เปลี่ยนได้จาก Jira...</p>}
+                  {allowedStatuses === null && <p className="mt-1 flex items-center gap-1.5 text-[11px] text-faint"><Spinner />กำลังดึงสถานะที่เปลี่ยนได้จาก Jira...</p>}
                   {statusNote && <p className="mt-1 text-[11px] text-attention">{statusNote}</p>}
                   {liveStatus && liveStatus !== ticket.status && (
                     <p className="mt-1 text-[11px] text-accent">
@@ -634,17 +635,10 @@ export default function TicketDetailModal({
               <button
                 onClick={() => handleSave(false)}
                 disabled={saving}
+                aria-busy={saving}
                 className="btn-primary py-2"
               >
-                {saving ? (
-                  <>
-                    <svg className="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                    </svg>
-                    กำลังบันทึกลง Jira...
-                  </>
-                ) : 'บันทึกลง Jira'}
+                {saving ? 'กำลังบันทึกลง Jira...' : 'บันทึกลง Jira'}
               </button>
               {nav?.onNext && (
                 <button

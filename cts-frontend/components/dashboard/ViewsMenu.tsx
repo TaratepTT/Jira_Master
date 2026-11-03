@@ -107,7 +107,7 @@ export default function ViewsMenu({
                         maxLength={60}
                         className="field"
                       />
-                      <button type="button" onClick={save} disabled={!name.trim() || saving} className="btn-primary shrink-0">บันทึก</button>
+                      <button type="button" onClick={save} disabled={!name.trim() || saving} aria-busy={saving} className="btn-primary shrink-0">บันทึก</button>
                     </div>
                     <label className="mt-1.5 flex items-center gap-1.5 text-[12px] text-muted">
                       <input type="checkbox" checked={shared} onChange={e => setShared(e.target.checked)} className="accent-[var(--accent)]" />

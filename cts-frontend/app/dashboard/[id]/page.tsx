@@ -430,7 +430,7 @@ export default function DashboardPage() {
           description={<>sync เมื่อ {thaiDate(createdAt)}{data.refreshedAt && <>, รีเฟรชจาก Jira ล่าสุด {thaiDateTime(data.refreshedAt)}</>}</>}
           actions={
             <>
-              <button onClick={handleExportCsv} disabled={exportingCsv} className="btn">
+              <button onClick={handleExportCsv} disabled={exportingCsv} aria-busy={exportingCsv} className="btn">
                 {exportingCsv ? 'กำลัง export...' : 'Export CSV'}
               </button>
               <Link href={`/compare?current=${id}`} className="btn">เทียบกับ report ก่อนหน้า</Link>

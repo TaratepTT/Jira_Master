@@ -76,7 +76,7 @@ export default function TicketPlaybooks({ ticketKey, canSend }: { ticketKey: str
               </span>
               {m.confluenceUrl && <a href={m.confluenceUrl} target="_blank" rel="noreferrer" className="btn-quiet shrink-0">เปิด</a>}
               {canSend && (
-                <button onClick={() => send({ id: m.playbookId, title: m.title })} disabled={busy !== null} className="btn shrink-0 py-1">
+                <button onClick={() => send({ id: m.playbookId, title: m.title })} disabled={busy !== null} aria-busy={busy === m.playbookId} className="btn shrink-0 py-1">
                   {busy === m.playbookId ? 'กำลังส่ง...' : 'ส่งให้ L1 ใน Jira'}
                 </button>
               )}
@@ -96,7 +96,7 @@ export default function TicketPlaybooks({ ticketKey, canSend }: { ticketKey: str
                   {pg.excerpt && <span className="block truncate text-[12px] text-muted">{pg.excerpt}</span>}
                 </span>
                 {canSend && (
-                  <button onClick={() => send({ id: pg.id, title: pg.title, confluence: true })} disabled={busy !== null} className="btn shrink-0 py-1">
+                  <button onClick={() => send({ id: pg.id, title: pg.title, confluence: true })} disabled={busy !== null} aria-busy={busy === pg.id} className="btn shrink-0 py-1">
                     {busy === pg.id ? 'กำลังส่ง...' : 'ส่งลิงก์ให้ L1'}
                   </button>
                 )}

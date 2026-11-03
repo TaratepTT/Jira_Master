@@ -69,6 +69,23 @@
 }
 
 @layer components {
+  /* Loading spinner. Any button with aria-busy="true" shows one before its label, so every action
+     that waits on the server looks the same. Use <Spinner /> for loading text outside buttons. */
+  .spinner {
+    display: inline-block; width: 1em; height: 1em; flex: none;
+    border: 2px solid currentColor; border-right-color: transparent; border-radius: 9999px;
+    vertical-align: -0.15em; animation: cts-spin 0.7s linear infinite;
+  }
+  button[aria-busy="true"] { cursor: progress; }
+  button[aria-busy="true"]::before {
+    content: ''; display: inline-block; width: 1em; height: 1em; flex: none; margin-right: 0.4em;
+    border: 2px solid currentColor; border-right-color: transparent; border-radius: 9999px;
+    vertical-align: -0.15em; animation: cts-spin 0.7s linear infinite;
+  }
+  button.flex[aria-busy="true"]::before, button.inline-flex[aria-busy="true"]::before,
+  .btn[aria-busy="true"]::before, .btn-primary[aria-busy="true"]::before, .btn-quiet[aria-busy="true"]::before { margin-right: 0; }
+  button[aria-busy="true"]:disabled { opacity: 0.8; }
+
   /* surfaces */
   .panel { @apply rounded-lg border border-line bg-surface; }
   .panel-pad { @apply p-5; }
@@ -103,4 +120,9 @@
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+}
+
+@keyframes cts-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .spinner, button[aria-busy="true"]::before { animation-duration: 2.4s; }
 }

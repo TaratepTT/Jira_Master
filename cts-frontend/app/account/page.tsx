@@ -89,7 +89,7 @@ export default function AccountPage() {
           {error && <div className="rounded-lg bg-sunken border border-line px-3 py-2"><p className="text-xs text-danger">{error}</p></div>}
           {success && <div className="rounded-lg bg-sunken border border-line px-3 py-2"><p className="text-xs text-ok">{success}</p></div>}
 
-          <button type="submit" disabled={saving} className="rounded-lg bg-accent px-5 py-2 text-sm font-semibold text-on-accent hover:bg-accent-strong disabled:opacity-50 transition-colors">
+          <button type="submit" disabled={saving} aria-busy={saving} className="rounded-lg bg-accent px-5 py-2 text-sm font-semibold text-on-accent hover:bg-accent-strong disabled:opacity-50 transition-colors">
             {saving ? 'กำลังบันทึก...' : 'เปลี่ยนรหัสผ่าน'}
           </button>
         </form>

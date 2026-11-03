@@ -583,6 +583,7 @@ function ValidateScreenInner() {
           <button
             onClick={handleConfirm}
             disabled={saveState.state === 'saving' || selected.size === 0}
+            aria-busy={saveState.state === 'saving'}
             className="btn-primary px-4 py-2 text-[14px]"
           >
             {saveState.state === 'saving' ? 'กำลังบันทึก...' : 'บันทึกเป็น report'}

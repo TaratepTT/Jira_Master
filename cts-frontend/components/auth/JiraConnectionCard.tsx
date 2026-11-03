@@ -60,7 +60,7 @@ export default function JiraConnectionCard({ notice }: { notice?: string }) {
             <p className="font-medium text-ok">เชื่อมต่อแล้ว: {st.account.displayName}</p>
             <p className="text-xs text-muted">{[st.account.email, st.account.siteUrl].filter(Boolean).join(', ')}</p>
           </div>
-          <button onClick={disconnect} disabled={busy} className="rounded-lg border border-line-strong px-3 py-1.5 text-xs font-medium text-muted hover:bg-white disabled:opacity-50">
+          <button onClick={disconnect} disabled={busy} aria-busy={busy} className="rounded-lg border border-line-strong px-3 py-1.5 text-xs font-medium text-muted hover:bg-white disabled:opacity-50">
             ยกเลิกการเชื่อมต่อ
           </button>
         </div>
@@ -71,7 +71,7 @@ export default function JiraConnectionCard({ notice }: { notice?: string }) {
               การเชื่อมต่อเดิม ({st.account?.displayName}) หมดอายุหรือถูกยกเลิก — ตอนนี้ใช้บัญชีกลางอยู่ กดเชื่อมต่อใหม่
             </p>
           )}
-          <button onClick={connect} disabled={busy} className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-on-accent hover:bg-accent-strong disabled:opacity-50">
+          <button onClick={connect} disabled={busy} aria-busy={busy} className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-on-accent hover:bg-accent-strong disabled:opacity-50">
             {busy ? 'กำลังไปที่ Atlassian...' : st.needsReconnect ? 'เชื่อมต่อใหม่' : 'เชื่อมบัญชี Jira'}
           </button>
         </div>

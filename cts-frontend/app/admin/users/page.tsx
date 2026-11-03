@@ -41,6 +41,7 @@ export default function AdminUsersPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [busyId, setBusyId] = useState<string | null>(null)
+  const [act, setAct] = useState('') // which button in the row is running
   // role chosen in the dropdown of a PENDING row, before pressing "อนุมัติ"
   const [pendingRole, setPendingRole] = useState<Record<string, UserRole>>({})
   const [resetFor, setResetFor] = useState<AppUser | null>(null)
@@ -114,7 +115,7 @@ export default function AdminUsersPage() {
                   </span>
                 )}
               </h1>
-              <button onClick={load} className="rounded-lg border border-line-strong px-3 py-1.5 text-xs font-medium text-muted hover:bg-sunken transition-colors">
+              <button onClick={load} disabled={loading} aria-busy={loading} className="rounded-lg border border-line-strong px-3 py-1.5 text-xs font-medium text-muted hover:bg-sunken transition-colors">
                 รีเฟรช
               </button>
             </div>
@@ -182,14 +183,16 @@ export default function AdminUsersPage() {
                                 <>
                                   <button
                                     disabled={busy}
-                                    onClick={() => patch(u, { status: 'active', role: pendingRole[u.id] ?? u.role })}
+                                    aria-busy={busy && act === 'approve'}
+                                    onClick={() => { setAct('approve'); patch(u, { status: 'active', role: pendingRole[u.id] ?? u.role }) }}
                                     className="btn-primary py-1"
                                   >
                                     อนุมัติ
                                   </button>
                                   <button
                                     disabled={busy}
-                                    onClick={() => { if (confirm(`ปฏิเสธคำขอของ ${u.email}?`)) patch(u, { status: 'disabled' }) }}
+                                    aria-busy={busy && act === 'reject'}
+                                    onClick={() => { if (confirm(`ปฏิเสธคำขอของ ${u.email}?`)) { setAct('reject'); patch(u, { status: 'disabled' }) } }}
                                     className="rounded-lg border border-line-strong px-3 py-1 text-xs font-medium text-muted hover:bg-sunken disabled:opacity-50 transition-colors"
                                   >
                                     ปฏิเสธ
@@ -199,7 +202,8 @@ export default function AdminUsersPage() {
                               {u.status === 'active' && !isMe && (
                                 <button
                                   disabled={busy}
-                                  onClick={() => { if (confirm(`ระงับบัญชี ${u.email}? เขาจะถูกออกจากระบบทันที`)) patch(u, { status: 'disabled' }) }}
+                                  aria-busy={busy && act === 'suspend'}
+                                  onClick={() => { if (confirm(`ระงับบัญชี ${u.email}? เขาจะถูกออกจากระบบทันที`)) { setAct('suspend'); patch(u, { status: 'disabled' }) } }}
                                   className="rounded-lg border border-line px-3 py-1 text-xs font-medium text-danger hover:bg-danger-soft disabled:opacity-50 transition-colors"
                                 >
                                   ระงับ
@@ -208,7 +212,8 @@ export default function AdminUsersPage() {
                               {u.status === 'disabled' && (
                                 <button
                                   disabled={busy}
-                                  onClick={() => patch(u, { status: 'active' })}
+                                  aria-busy={busy && act === 'enable'}
+                                  onClick={() => { setAct('enable'); patch(u, { status: 'active' }) }}
                                   className="rounded-lg border border-line-strong px-3 py-1 text-xs font-medium text-muted hover:bg-sunken disabled:opacity-50 transition-colors"
                                 >
                                   เปิดใช้งานอีกครั้ง
@@ -263,7 +268,7 @@ export default function AdminUsersPage() {
             </div>
             {resetError && <p className="text-xs text-danger">{resetError}</p>}
             <div className="flex items-center gap-2">
-              <button onClick={submitReset} disabled={busyId === resetFor.id} className="flex-1 rounded-lg bg-accent py-2 text-sm font-medium text-on-accent hover:bg-accent-strong disabled:opacity-50 transition-colors">
+              <button onClick={submitReset} disabled={busyId === resetFor.id} aria-busy={busyId === resetFor.id} className="flex-1 rounded-lg bg-accent py-2 text-sm font-medium text-on-accent hover:bg-accent-strong disabled:opacity-50 transition-colors">
                 ตั้งรหัสผ่านใหม่
               </button>
               <button onClick={() => setResetFor(null)} className="rounded-lg border border-line-strong px-4 py-2 text-sm font-medium text-muted hover:bg-sunken transition-colors">

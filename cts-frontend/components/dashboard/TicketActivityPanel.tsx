@@ -189,9 +189,10 @@ export default function TicketActivityPanel({ reportId, ticketKey }: { reportId:
             <button
               onClick={() => handleDownload(a)}
               disabled={downloadingId === a.id}
+              aria-busy={downloadingId === a.id}
               className="rounded-lg border border-line-strong px-3 py-1 text-[11px] font-medium text-muted hover:bg-sunken disabled:opacity-40 transition-colors"
             >
-              {downloadingId === a.id ? '...' : 'ดาวน์โหลดแทน'}
+              {downloadingId === a.id ? 'กำลังโหลด' : 'ดาวน์โหลดแทน'}
             </button>
           </div>
         ) : null}
@@ -317,21 +318,23 @@ export default function TicketActivityPanel({ reportId, ticketKey }: { reportId:
                     <button
                       onClick={() => handleTogglePreview(a)}
                       disabled={previewLoading && previewId === a.id}
+                      aria-busy={previewLoading && previewId === a.id}
                       className={`rounded-lg border px-2 py-1 text-[11px] font-medium transition-colors disabled:opacity-40 ${
                         previewId === a.id
                           ? 'border-accent bg-accent-soft text-accent'
                           : 'border-line-strong text-muted hover:bg-sunken'
                       }`}
                     >
-                      {previewLoading && previewId === a.id ? '...' : previewId === a.id ? 'ปิด' : 'ดู'}
+                      {previewLoading && previewId === a.id ? 'ดู' : previewId === a.id ? 'ปิด' : 'ดู'}
                     </button>
                     {/* Download */}
                     <button
                       onClick={() => handleDownload(a)}
                       disabled={downloadingId === a.id}
+                      aria-busy={downloadingId === a.id}
                       className="rounded-lg border border-line-strong px-2 py-1 text-[11px] font-medium text-muted hover:bg-sunken disabled:opacity-40 transition-colors"
                     >
-                      {downloadingId === a.id ? '...' : 'ดาวน์โหลด'}
+                      {downloadingId === a.id ? 'กำลังโหลด' : 'ดาวน์โหลด'}
                     </button>
                   </div>
                 </div>
@@ -356,9 +359,10 @@ export default function TicketActivityPanel({ reportId, ticketKey }: { reportId:
           <button
             onClick={handlePostComment}
             disabled={posting || !newComment.trim()}
+            aria-busy={posting}
             className="rounded-lg bg-accent px-3 py-1.5 text-xs font-medium text-on-accent hover:bg-accent-strong disabled:opacity-40 transition-colors"
           >
-            {posting ? '...' : 'ส่ง'}
+            {posting ? 'กำลังส่ง' : 'ส่ง'}
           </button>
         </div>
       )}

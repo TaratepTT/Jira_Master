@@ -1,5 +1,6 @@
 'use client'
 
+import Spinner from '@/components/ui/Spinner'
 import { useEffect, useMemo, useState } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
@@ -91,7 +92,7 @@ export default function ReportSummaryPage() {
   }, [data, asOf])
 
   if (error) return <div className="min-h-screen bg-white flex items-center justify-center text-red-600">{error}</div>
-  if (!data || !stats) return <div className="min-h-screen bg-white flex items-center justify-center text-slate-400">กำลังโหลด...</div>
+  if (!data || !stats) return <div className="min-h-screen bg-white flex items-center justify-center gap-2 text-slate-400"><Spinner />กำลังโหลด...</div>
 
   const kpi = (kid: CompareKpi['id']) => cmp?.kpis.find(k => k.id === kid)
   const total = data.totalTickets

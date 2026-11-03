@@ -113,7 +113,7 @@ export default function SlaPanel({
           </div>
           {error && <p className="mt-2 text-[12px] text-danger">{error}</p>}
           <div className="mt-3 flex gap-2">
-            <button onClick={save} disabled={saving} className="btn-primary">{saving ? 'กำลังบันทึก...' : 'บันทึกเป้าเวลา'}</button>
+            <button onClick={save} disabled={saving} aria-busy={saving} className="btn-primary">{saving ? 'กำลังบันทึก...' : 'บันทึกเป้าเวลา'}</button>
             <button onClick={() => setEditing(false)} className="btn-quiet">ยกเลิก</button>
           </div>
         </div>
