@@ -7,7 +7,7 @@ import { fmtDays, median, parseDate, percentile, resolutionDays, shortThaiDate, 
 const MAX_WEEKS = 12
 // Validated pair (light: blue-600 / amber-600, dark: blue-500 / amber-600) — distinct for colour-blind readers too
 const CREATED_FILL = 'fill-chart-a'
-const RESOLVED_FILL = 'fill-chart-b'
+const RESOLVED_FILL = 'fill-ok' // colour rule: blue = all / created, amber = open or late, green = closed
 
 interface Week { key: string; created: number; resolved: number }
 

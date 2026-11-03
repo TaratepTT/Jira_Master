@@ -47,7 +47,7 @@ function getDayKey(date: Date): string {
   return date.toISOString().slice(0, 10)
 }
 
-// ── SVG Line Chart ─────────────────────────────────────────────
+// ── Chart data ─────────────────────────────────────────────────
 interface LinePoint { label: string; open: number; closed: number; total: number }
 
 // Whole-number ticks only (ticket counts), at most ~5 lines
@@ -59,51 +59,43 @@ function intTicks(max: number): number[] {
   return out
 }
 
-function LineChart({ points }: { points: LinePoint[] }) {
+// Stacked bars: each period = tickets created then, split by where they are now (closed at the
+// bottom, still open on top), so the open part — the work left — is what stands out.
+function StackedBars({ points }: { points: LinePoint[] }) {
   const [hover, setHover] = useState<number | null>(null)
-  if (points.length < 2) {
-    return <p className="py-10 text-center text-[13px] text-faint">ต้องมีข้อมูลอย่างน้อย 2 ช่วงเวลาถึงจะวาดกราฟได้</p>
-  }
-  const W = 960, H = 210
-  const PAD = { top: 14, right: 16, bottom: 30, left: 34 }
+  if (!points.length) return null
+  const W = 960, H = 220
+  const PAD = { top: 14, right: 12, bottom: 30, left: 34 }
   const cw = W - PAD.left - PAD.right, ch = H - PAD.top - PAD.bottom
   const ticks = intTicks(Math.max(...points.map(p => p.total), 1))
   const maxY = ticks[ticks.length - 1]
-  const step = cw / (points.length - 1)
-  const x = (i: number) => PAD.left + i * step
+  const slot = cw / points.length
+  const bw = Math.max(4, Math.min(36, slot * 0.62))
+  const x = (i: number) => PAD.left + i * slot + slot / 2
   const y = (v: number) => PAD.top + ch - (v / maxY) * ch
-  const path = (k: 'total' | 'closed' | 'open') => points.map((p, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(p[k]).toFixed(1)}`).join(' ')
-  const area = `${path('total')} L${x(points.length - 1)},${PAD.top + ch} L${PAD.left},${PAD.top + ch} Z`
   const every = Math.max(1, Math.ceil(points.length / 10))
   const hp = hover !== null ? points[hover] : null
-
   return (
     <div className="relative overflow-x-auto">
-      <svg viewBox={`0 0 ${W} ${H}`} className="h-auto w-full min-w-[600px]" role="img" aria-label="จำนวน ticket ตามวันที่สร้าง แยกตามสถานะปัจจุบัน">
+      <svg viewBox={`0 0 ${W} ${H}`} className="h-auto w-full min-w-[600px]" role="img" aria-label="จำนวน ticket ที่สร้างในแต่ละช่วง แยกเป็นปิดแล้วและยังเปิด">
         {ticks.map(t => (
           <g key={t}>
             <line x1={PAD.left} x2={W - PAD.right} y1={y(t)} y2={y(t)} className="stroke-line" strokeWidth={1} />
             <text x={PAD.left - 8} y={y(t) + 4} textAnchor="end" fontSize="11" className="fill-faint">{t}</text>
           </g>
         ))}
-        <path d={area} className="fill-sunken" />
-        <path d={path('total')} fill="none" className="stroke-faint" strokeWidth={1.5} strokeLinejoin="round" />
-        <path d={path('closed')} fill="none" className="stroke-chart-a" strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
-        <path d={path('open')} fill="none" className="stroke-chart-b" strokeWidth={2} strokeDasharray="5 3" strokeLinejoin="round" strokeLinecap="round" />
-        {points.map((p, i) => (
-          <g key={i}>
-            {i % every === 0 && <text x={x(i)} y={H - 8} textAnchor="middle" fontSize="11" className="fill-faint">{p.label}</text>}
-            {hover === i && (
-              <>
-                <line x1={x(i)} x2={x(i)} y1={PAD.top} y2={PAD.top + ch} className="stroke-line-strong" strokeWidth={1} />
-                <circle cx={x(i)} cy={y(p.closed)} r={4.5} className="fill-chart-a stroke-surface" strokeWidth={2} />
-                <circle cx={x(i)} cy={y(p.open)} r={4.5} className="fill-chart-b stroke-surface" strokeWidth={2} />
-              </>
-            )}
-            <rect x={x(i) - step / 2} y={PAD.top} width={step} height={ch + 20} fill="transparent"
-              onMouseEnter={() => setHover(i)} onMouseLeave={() => setHover(null)} />
-          </g>
-        ))}
+        {points.map((p, i) => {
+          const yc = y(p.closed), yt = y(p.total)
+          return (
+            <g key={i} opacity={hover === null || hover === i ? 1 : 0.45}>
+              {p.closed > 0 && <rect x={x(i) - bw / 2} y={yc} width={bw} height={PAD.top + ch - yc} rx={2} className="fill-ok" />}
+              {p.open > 0 && <rect x={x(i) - bw / 2} y={yt} width={bw} height={yc - yt - (p.closed > 0 ? 1.5 : 0)} rx={2} className="fill-chart-b" />}
+              {i % every === 0 && <text x={x(i)} y={H - 8} textAnchor="middle" fontSize="11" className="fill-faint">{p.label}</text>}
+              <rect x={x(i) - slot / 2} y={PAD.top} width={slot} height={ch + 20} fill="transparent"
+                onMouseEnter={() => setHover(i)} onMouseLeave={() => setHover(null)} />
+            </g>
+          )
+        })}
       </svg>
       {hp && hover !== null && (
         <div
@@ -112,8 +104,8 @@ function LineChart({ points }: { points: LinePoint[] }) {
         >
           <p className="mb-0.5 font-medium text-ink">{hp.label}</p>
           <p className="text-muted">สร้างทั้งหมด <span className="num font-medium text-ink">{hp.total}</span></p>
-          <p className="text-muted">ปิดแล้ว <span className="num font-medium text-ink">{hp.closed}</span></p>
           <p className="text-muted">ยังเปิด <span className="num font-medium text-ink">{hp.open}</span></p>
+          <p className="text-muted">ปิดแล้ว <span className="num font-medium text-ink">{hp.closed}</span></p>
         </div>
       )}
     </div>
@@ -149,9 +141,19 @@ export default function TrendChart({ tickets }: TrendChartProps) {
       else entry.open++
     }
 
-    return Array.from(map.values())
-      .sort((a, b) => a.ts - b.ts)
-      .map(e => ({ label: e.label, open: e.open, closed: e.closed, total: e.open + e.closed }))
+    const sorted = Array.from(map.entries()).sort((a, b) => a[1].ts - b[1].ts)
+    if (!sorted.length) return []
+    // fill the periods with no new tickets, so a quiet week shows as a gap and not as nothing
+    const stepDays = viewMode === 'weekly' ? 7 : 1
+    const out: LinePoint[] = []
+    const first = new Date(sorted[0][0] + 'T00:00:00Z'), last = new Date(sorted[sorted.length - 1][0] + 'T00:00:00Z')
+    for (let d = first, n = 0; d <= last && n < 120; d = new Date(d.getTime() + stepDays * 864e5), n++) {
+      const k = d.toISOString().slice(0, 10)
+      const e = map.get(k)
+      const label = e?.label ?? d.toLocaleDateString('th-TH', { day: 'numeric', month: 'short', timeZone: 'UTC' })
+      out.push({ label, open: e?.open ?? 0, closed: e?.closed ?? 0, total: (e?.open ?? 0) + (e?.closed ?? 0) })
+    }
+    return out
   }, [ticketsWithDate, viewMode])
 
   // สัปดาห์ปัจจุบัน vs สัปดาห์ที่แล้ว
@@ -213,11 +215,10 @@ export default function TrendChart({ tickets }: TrendChartProps) {
       ) : (
         <>
           <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-1 text-[12px] text-muted">
-            <span className="flex items-center gap-1.5"><svg width="18" height="6" aria-hidden><line x1="0" y1="3" x2="18" y2="3" className="stroke-chart-a" strokeWidth="2" /></svg>ปิดแล้ว (สถานะปัจจุบัน)</span>
-            <span className="flex items-center gap-1.5"><svg width="18" height="6" aria-hidden><line x1="0" y1="3" x2="18" y2="3" className="stroke-chart-b" strokeWidth="2" strokeDasharray="5 3" /></svg>ยังเปิด</span>
-            <span className="flex items-center gap-1.5"><svg width="18" height="6" aria-hidden><line x1="0" y1="3" x2="18" y2="3" className="stroke-faint" strokeWidth="1.5" /></svg>รวม</span>
+            <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-sm bg-chart-b" aria-hidden />ยังเปิด</span>
+            <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-sm bg-ok" aria-hidden />ปิดแล้ว (สถานะปัจจุบัน)</span>
           </div>
-          <div className="mt-2"><LineChart points={points} /></div>
+          <div className="mt-2"><StackedBars points={points} /></div>
           {noDateCount > 0 && <p className="mt-2 text-[12px] text-faint">มี {noDateCount} ticket ที่ไม่มีวันที่สร้าง จึงไม่อยู่ในกราฟ</p>}
         </>
       )}

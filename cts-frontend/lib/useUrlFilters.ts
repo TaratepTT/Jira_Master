@@ -8,6 +8,9 @@ import { useEffect, useRef, useState } from 'react'
 // (Reads window.location directly instead of useSearchParams, so the page needs no
 // Suspense boundary and the address bar is updated with replaceState — no re-navigation.)
 
+export type DashTab = 'overview' | 'tickets' | 'health' | 'trends'
+const TABS: DashTab[] = ['overview', 'tickets', 'health', 'trends']
+
 export interface DashboardFilters {
   q: string
   bu: string[]
@@ -19,10 +22,11 @@ export interface DashboardFilters {
   sort: string | null      // SortKey
   dir: 'asc' | 'desc'
   ticket: string | null    // open ticket modal
+  tab: DashTab             // dashboard tab
 }
 
 export const EMPTY_FILTERS: DashboardFilters = {
-  q: '', bu: [], status: [], system: [], category: [], assignee: [], incomplete: false, sort: null, dir: 'asc', ticket: null,
+  q: '', bu: [], status: [], system: [], category: [], assignee: [], incomplete: false, sort: null, dir: 'asc', ticket: null, tab: 'overview',
 }
 
 const PARAM = { q: 'q', bu: 'bu', status: 'st', system: 'sys', category: 'cat', assignee: 'as', incomplete: 'incomplete', sort: 'sort', ticket: 't' } as const
@@ -42,6 +46,7 @@ export function readFilters(search: string): DashboardFilters {
     sort: sort || null,
     dir: dir === 'desc' ? 'desc' : 'asc',
     ticket: p.get(PARAM.ticket),
+    tab: (TABS as string[]).includes(p.get('tab') ?? '') ? (p.get('tab') as DashTab) : p.get(PARAM.ticket) || p.get(PARAM.q) || p.get(PARAM.incomplete) || p.getAll(PARAM.bu).length || p.getAll(PARAM.status).length || p.getAll(PARAM.assignee).length ? 'tickets' : 'overview',
   }
 }
 
@@ -56,6 +61,7 @@ export function filtersToQuery(f: DashboardFilters): string {
   if (f.incomplete) p.set(PARAM.incomplete, '1')
   if (f.sort) p.set(PARAM.sort, `${f.sort}:${f.dir}`)
   if (f.ticket) p.set(PARAM.ticket, f.ticket)
+  if (f.tab && f.tab !== 'overview') p.set('tab', f.tab)
   const s = p.toString()
   return s ? `?${s}` : ''
 }

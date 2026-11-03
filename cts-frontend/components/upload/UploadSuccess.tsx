@@ -20,7 +20,7 @@ export default function UploadSuccess({ reportId, totalTickets, onReset }: Props
 
       <div className="space-y-1">
         <p className="text-base font-semibold text-ok">อัปโหลดสำเร็จ</p>
-        <p className="text-sm text-ok">{totalTickets} tickets พร้อมแสดงผล</p>
+        <p className="text-sm text-ok">{totalTickets} ticket พร้อมแสดงผล</p>
       </div>
 
       <div className="flex flex-col gap-2 sm:flex-row sm:justify-center">

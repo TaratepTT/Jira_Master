@@ -231,8 +231,10 @@ export default function TicketDetailModal({
   }, [autoEdit, canEdit])
 
   // Keyboard: ← / → previous/next ticket, Esc close (or leave edit mode), Ctrl/⌘+Enter save
-  const keyState = useRef({ editing, saving, nav, onClose })
-  keyState.current = { editing, saving, nav, onClose }
+  const keyState = useRef({ editing, saving, nav, onClose, canEdit })
+  keyState.current = { editing, saving, nav, onClose, canEdit }
+  const startEditRef = useRef<() => void>(() => {})
+  startEditRef.current = () => { if (!editing) startEdit() }
   const saveRef = useRef(handleSave)
   saveRef.current = handleSave
   useEffect(() => {
@@ -247,8 +249,9 @@ export default function TicketDetailModal({
       }
       if (typing) return
       if (e.key === 'Escape') { e.preventDefault(); st.onClose() }
-      else if (e.key === 'ArrowLeft' && st.nav?.onPrev) { e.preventDefault(); st.nav.onPrev() }
-      else if (e.key === 'ArrowRight' && st.nav?.onNext) { e.preventDefault(); st.nav.onNext() }
+      else if ((e.key === 'ArrowLeft' || e.key === 'k') && st.nav?.onPrev) { e.preventDefault(); st.nav.onPrev() }
+      else if ((e.key === 'ArrowRight' || e.key === 'j') && st.nav?.onNext) { e.preventDefault(); st.nav.onNext() }
+      else if (e.key === 'e' && st.canEdit && !e.ctrlKey && !e.metaKey) { e.preventDefault(); startEditRef.current() }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -257,12 +260,13 @@ export default function TicketDetailModal({
   const missing = missingFields(ticket)
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4"
-      onClick={onClose}
-    >
+    // Side panel: on wide screens the table stays visible on the left, so the next ticket is one click away
+    <div className="fixed inset-0 z-50 flex justify-end bg-black/40 lg:bg-black/15" onClick={onClose}>
       <div
-        className="w-full max-w-2xl rounded-xl border border-line bg-surface p-6 shadow-2xl max-h-[88vh] overflow-y-auto"
+        role="dialog"
+        aria-modal="true"
+        aria-label={`ticket ${ticket.key}`}
+        className="side-panel pop flex h-full w-full flex-col overflow-y-auto border-l border-line bg-surface p-6 sm:w-[min(640px,92vw)]"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-start justify-between mb-4">

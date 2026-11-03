@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import CommandPalette, { useCommandPaletteShortcut } from './CommandPalette'
+import ShortcutsHelp from './ShortcutsHelp'
 import { useAuth } from '@/components/auth/AuthContext'
 import { useTheme } from '@/components/theme/ThemeProvider'
 import { listChecks, type WatchState } from '@/lib/api'
@@ -79,8 +80,8 @@ export function AppNav() {
 
   const groups: Array<{ label: string; items: NavItem[] }> = [
     { label: 'รายงาน', items: [
-      { href: '/', label: 'Reports', icon: 'reports', match: p => p === '/' || p.startsWith('/dashboard') || p.startsWith('/history'), show: true },
-      { href: '/jira', label: 'Sync จาก Jira', icon: 'sync', match: p => p.startsWith('/jira') || p.startsWith('/upload'), show: canEdit },
+      { href: '/', label: 'รายงาน', icon: 'reports', match: p => p === '/' || p.startsWith('/dashboard') || p.startsWith('/history'), show: true },
+      { href: '/jira', label: 'ดึงข้อมูลจาก Jira', icon: 'sync', match: p => p.startsWith('/jira') || p.startsWith('/upload'), show: canEdit },
       { href: '/compare', label: 'เปรียบเทียบ', icon: 'compare', match: p => p.startsWith('/compare'), show: true },
     ] },
     { label: 'ช่วยทีม L1', items: [
@@ -220,6 +221,7 @@ export function AppNav() {
         </div>
       )}
       <CommandPalette open={paletteOpen} onClose={closePalette} />
+      <ShortcutsHelp />
     </>
   )
 }

@@ -9,6 +9,7 @@ import './globals.css'
 import { ThemeProvider } from '@/components/theme/ThemeProvider'
 import { AuthProvider } from '@/components/auth/AuthContext'
 import { DialogProvider } from '@/components/ui/Dialog'
+import { ToastProvider } from '@/components/ui/Toast'
 
 export const metadata: Metadata = {
   title: 'CTS Support Console',
@@ -24,7 +25,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     >
       <body className="font-sans bg-paper text-ink">
         <ThemeProvider>
-          <DialogProvider><AuthProvider>{children}</AuthProvider></DialogProvider>
+          <DialogProvider><ToastProvider><AuthProvider>{children}</AuthProvider></ToastProvider></DialogProvider>
         </ThemeProvider>
       </body>
     </html>

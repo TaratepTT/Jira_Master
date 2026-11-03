@@ -7,6 +7,7 @@ import AppShell, { PageHeader } from '@/components/layout/AppShell'
 import BacklogPanel from '@/components/dashboard/BacklogPanel'
 import { useAuth } from '@/components/auth/AuthContext'
 import { useDialog } from '@/components/ui/Dialog'
+import { useToast } from '@/components/ui/Toast'
 
 interface Report {
   id: string
@@ -19,6 +20,7 @@ export default function HomePage() {
   const [reports, setReports] = useState<Report[]>([])
   const [loading, setLoading] = useState(true)
   const [deletingId, setDeletingId] = useState<string | null>(null)
+  const toast = useToast()
   const { confirm, notify } = useDialog()
   const [search, setSearch] = useState('')
   const { canEdit, isAdmin } = useAuth()
@@ -38,11 +40,11 @@ export default function HomePage() {
 
   const handleDelete = async (id: string) => {
     const target = reports.find(r => r.id === id)
-    if (!(await confirm({ title: 'ลบ report นี้?', message: 'ticket ทั้งหมดใน report นี้จะถูกลบออกจากระบบ ลบแล้วกู้คืนไม่ได้ (ข้อมูลใน Jira ไม่ถูกแตะ)', detail: target ? <><span className="font-medium">{target.name}</span><span className="text-muted"> · {target.totalTickets.toLocaleString()} tickets</span></> : undefined, confirmLabel: 'ลบ report', tone: 'danger' }))) return
+    if (!(await confirm({ title: 'ลบ report นี้?', message: 'ticket ทั้งหมดใน report นี้จะถูกลบออกจากระบบ ลบแล้วกู้คืนไม่ได้ (ข้อมูลใน Jira ไม่ถูกแตะ)', detail: target ? <><span className="font-medium">{target.name}</span><span className="text-muted"> · {target.totalTickets.toLocaleString()} ticket</span></> : undefined, confirmLabel: 'ลบ report', tone: 'danger' }))) return
     setDeletingId(id)
     try {
       await deleteReport(id)
-      setReports(prev => prev.filter(r => r.id !== id))
+      setReports(prev => prev.filter(r => r.id !== id)); toast.show({ text: target ? `ลบ report "${target.name}" แล้ว` : 'ลบ report แล้ว' })
     } catch {
       await notify({ title: 'ลบ report ไม่สำเร็จ', message: 'ลองใหม่อีกครั้ง ถ้ายังไม่ได้ให้ตรวจว่ายังเข้าสู่ระบบอยู่', tone: 'danger' })
     } finally {
@@ -61,19 +63,25 @@ export default function HomePage() {
   return (
     <AppShell>
       <PageHeader
-        title="Reports"
+        title="รายงาน"
         description={canEdit
-          ? 'แต่ละ report คือชุด ticket ที่ sync จาก Jira ในรอบนั้น ตรวจข้อมูลก่อนบันทึกทุกครั้ง'
-          : 'คุณมีสิทธิ์ดูอย่างเดียว เปิด Dashboard ได้ทุก report ถ้าต้อง sync หรือแก้ไขข้อมูล ให้ขอสิทธิ์ Editor จากผู้ดูแลระบบ'}
+          ? 'แต่ละ report คือชุด ticket ที่ดึงจาก Jira ในรอบนั้น ตรวจข้อมูลก่อนบันทึกทุกครั้ง'
+          : 'คุณมีสิทธิ์ดูอย่างเดียว เปิด Dashboard ได้ทุก report ถ้าต้องดึงข้อมูลหรือแก้ไข ให้ขอสิทธิ์ Editor จากผู้ดูแลระบบ'}
         actions={canEdit && (
           <>
             <Link href="/upload" className="btn">นำเข้าจากไฟล์</Link>
-            <Link href="/jira" className="btn">Sync จาก Jira</Link>
+            <Link href="/jira" className="btn">ดึงข้อมูลจาก Jira</Link>
             <Link href="/jira?week=last" className="btn-primary" title="ดึง ticket ที่สร้างในสัปดาห์ที่แล้ว (จันทร์ถึงอาทิตย์) แล้วพาไปตรวจ บันทึก และสรุป">เริ่มรอบสัปดาห์นี้</Link>
           </>
         )}
       />
 
+      {loading && (
+        <div className="panel mb-8 flex animate-pulse items-center justify-between gap-4 px-5 py-4" aria-hidden>
+          <div className="space-y-2"><div className="h-3 w-20 rounded bg-sunken" /><div className="h-5 w-64 rounded bg-sunken" /><div className="h-3 w-48 rounded bg-sunken" /></div>
+          <div className="h-8 w-28 rounded-md bg-sunken" />
+        </div>
+      )}
       {latest && !search && (
         <Link
           href={`/dashboard/${latest.id}`}
@@ -82,7 +90,7 @@ export default function HomePage() {
           <div className="min-w-0">
             <p className="text-[13px] text-muted">report ล่าสุด</p>
             <p className="truncate text-[18px] font-semibold">{latest.name}</p>
-            <p className="text-[13px] text-muted num">{latest.totalTickets.toLocaleString()} tickets, sync เมื่อ {fmt(latest.createdAt)} {fmtTime(latest.createdAt)}</p>
+            <p className="text-[13px] text-muted num">{latest.totalTickets.toLocaleString()} ticket, ดึงข้อมูลเมื่อ {fmt(latest.createdAt)} {fmtTime(latest.createdAt)}</p>
           </div>
           <span className="btn">เปิด Dashboard</span>
         </Link>
@@ -111,10 +119,10 @@ export default function HomePage() {
           </div>
         ) : !filtered.length ? (
           <div className="panel px-6 py-14 text-center">
-            <p className="text-[14px] text-muted">
-              {search ? 'ไม่มี report ที่ชื่อตรงกับคำค้นนี้' : 'ยังไม่มี report — เริ่มจาก sync ข้อมูลจาก Jira'}
-            </p>
-            {!search && canEdit && <Link href="/jira" className="btn-primary mt-4">Sync จาก Jira</Link>}
+            <p className="text-[14.5px] font-medium text-ink">{search ? 'ไม่มี report ที่ชื่อตรงกับคำค้นนี้' : 'ยังไม่มี report'}</p>
+            <p className="mt-1 text-[13px] text-muted">{search ? 'ลองคำอื่น หรือล้างคำค้น' : 'เริ่มรอบแรกด้วยการดึง ticket ของสัปดาห์ที่แล้วจาก Jira ระบบจะพาไปตรวจข้อมูลก่อนบันทึก'}</p>
+            {search && <button onClick={() => setSearch('')} className="btn mt-4">ล้างคำค้น</button>}
+            {!search && canEdit && <Link href="/jira?week=last" className="btn-primary mt-4">เริ่มรอบสัปดาห์นี้</Link>}
           </div>
         ) : (
           <div className="panel overflow-x-auto">
@@ -122,8 +130,8 @@ export default function HomePage() {
               <thead>
                 <tr className="border-b border-line bg-sunken text-left text-[12px] text-muted">
                   <th className="px-4 py-2 font-medium">ชื่อ report</th>
-                  <th className="px-4 py-2 text-right font-medium">Tickets</th>
-                  <th className="px-4 py-2 font-medium">sync เมื่อ</th>
+                  <th className="px-4 py-2 text-right font-medium">ticket</th>
+                  <th className="px-4 py-2 font-medium">ดึงข้อมูลเมื่อ</th>
                   <th className="px-4 py-2" />
                 </tr>
               </thead>
@@ -131,7 +139,10 @@ export default function HomePage() {
                 {filtered.map(r => (
                   <tr key={r.id} className="border-b border-line last:border-b-0 transition-colors hover:bg-sunken">
                     <td className="max-w-[420px] px-4 py-2.5">
-                      <Link href={`/dashboard/${r.id}`} className="block truncate font-medium text-ink hover:text-accent">{r.name}</Link>
+                      <span className="flex min-w-0 items-center gap-2">
+                        <Link href={`/dashboard/${r.id}`} className="truncate font-medium text-ink hover:text-accent">{r.name}</Link>
+                        {r.id === latest?.id && <span className="chip shrink-0 border-transparent bg-accent-soft text-accent">รอบล่าสุด</span>}
+                      </span>
                     </td>
                     <td className="px-4 py-2.5 text-right num">{r.totalTickets.toLocaleString()}</td>
                     <td className="whitespace-nowrap px-4 py-2.5 text-muted num">{fmt(r.createdAt)} {fmtTime(r.createdAt)}</td>

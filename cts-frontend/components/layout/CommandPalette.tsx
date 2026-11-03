@@ -17,7 +17,7 @@ type Item =
   | { kind: 'report'; id: string; title: string; sub: string; run: () => void }
   | { kind: 'page'; id: string; title: string; sub: string; run: () => void }
 
-const KIND_LABEL: Record<Item['kind'], string> = { ticket: 'Tickets', report: 'Reports', page: 'ไปที่ / คำสั่ง' }
+const KIND_LABEL: Record<Item['kind'], string> = { ticket: 'ticket', report: 'รายงาน', page: 'ไปที่ / คำสั่ง' }
 
 export function useCommandPaletteShortcut(open: () => void) {
   useEffect(() => {
@@ -70,8 +70,8 @@ export default function CommandPalette({ open, onClose }: { open: boolean; onClo
   const items = useMemo<Item[]>(() => {
     const term = q.trim().toLowerCase()
     const pages: Item[] = [
-      { kind: 'page', id: 'p-reports', title: 'Reports', sub: 'รายการ report ทั้งหมด', run: () => go('/') },
-      ...(canEdit ? [{ kind: 'page' as const, id: 'p-sync', title: 'Sync จาก Jira', sub: 'สร้าง report ใหม่', run: () => go('/jira') }] : []),
+      { kind: 'page', id: 'p-reports', title: 'รายงาน', sub: 'report ทั้งหมด', run: () => go('/') },
+      ...(canEdit ? [{ kind: 'page' as const, id: 'p-sync', title: 'ดึงข้อมูลจาก Jira', sub: 'สร้าง report ใหม่', run: () => go('/jira') }] : []),
       { kind: 'page', id: 'p-compare', title: 'เปรียบเทียบ report', sub: 'สัปดาห์นี้เทียบสัปดาห์ก่อน', run: () => go('/compare') },
       { kind: 'page', id: 'p-playbooks', title: 'คู่มือ L1', sub: 'คู่มือที่ส่งให้ L1 ใน Jira อัตโนมัติ', run: () => go('/playbooks') },
       { kind: 'page', id: 'p-account', title: 'บัญชีของฉัน', sub: 'รหัสผ่าน และการเชื่อมบัญชี Jira', run: () => go('/account') },
@@ -83,7 +83,7 @@ export default function CommandPalette({ open, onClose }: { open: boolean; onClo
     ]
     const reportItems: Item[] = (reports ?? []).map(r => ({
       kind: 'report' as const, id: `r-${r.id}`, title: r.name,
-      sub: `${r.totalTickets} tickets, ${new Date(r.createdAt).toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: 'numeric' })}`,
+      sub: `${r.totalTickets} ticket, ${new Date(r.createdAt).toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: 'numeric' })}`,
       run: () => go(`/dashboard/${r.id}`),
     }))
     const ticketItems: Item[] = hits.map(h => ({

@@ -4,7 +4,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import api, { refreshReportFromJira, updateTicket, getJiraConnection, type BulkUpdateResponse } from '@/lib/api'
-import { useUrlFilters, filtersToQuery, readFilters } from '@/lib/useUrlFilters'
+import { useUrlFilters, filtersToQuery, readFilters, type DashTab } from '@/lib/useUrlFilters'
+import Tabs from '@/components/ui/Tabs'
 import ViewsMenu from '@/components/dashboard/ViewsMenu'
 import InlineCell, { type CellState } from '@/components/dashboard/InlineCell'
 import { AppNav, PageHeader } from '@/components/layout/AppShell'
@@ -24,9 +25,10 @@ import FilteredInsights from '@/components/dashboard/FilteredInsights'
 import TicketDetailModal, { type TicketNav } from '@/components/dashboard/TicketDetailModal'
 import type { ReportData, SortDir, SortKey, TicketDetail } from '@/components/dashboard/types'
 import {
-  TYPE_OF_ISSUE_OPTIONS, formatDate, isClosedStatus, isIncomplete, jiraBrowseUrl, openTicketAges, pct, statusBadge,
+  TYPE_OF_ISSUE_OPTIONS, formatDate, isClosedStatus, isIncomplete, jiraBrowseUrl, missingFields, openTicketAges, pct, statusBadge,
 } from '@/components/dashboard/utils'
 import { useDialog } from '@/components/ui/Dialog'
+import { useToast } from '@/components/ui/Toast'
 
 // The dashboard of one report. Sub-components live in components/dashboard/*:
 //   TicketDetailModal (edit + sync to Jira) · TicketActivityPanel (comments/history/files)
@@ -75,6 +77,7 @@ export default function DashboardPage() {
   const [highlighted, setHighlighted] = useState<Set<string>>(new Set())
   const [exportingCsv, setExportingCsv] = useState(false)
   const { notify } = useDialog()
+  const toast = useToast()
 
   // Filters, sort and the open ticket live in the address bar (shareable links) — lib/useUrlFilters.ts
   const [filters, setFilters] = useUrlFilters()
@@ -116,6 +119,7 @@ export default function DashboardPage() {
     [filters.ticket, data],
   )
   const openTicket = (key: string | null) => setFilters({ ticket: key })
+  const tab: DashTab = filters.tab
 
   // ── Refresh from Jira ─────────────────────────────────────
   const [refreshing, setRefreshing] = useState(false)
@@ -344,11 +348,29 @@ export default function DashboardPage() {
     }
   }
 
+  // "/" jumps to the ticket search
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement | null
+      if (e.key !== '/' || e.ctrlKey || e.metaKey || (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable))) return
+      e.preventDefault()
+      setFilters({ tab: 'tickets' })
+      setTimeout(() => (document.querySelector('input[aria-label="ค้นหา ticket"]') as HTMLInputElement | null)?.focus(), 30)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
   const [copied, setCopied] = useState(false)
+  // row density, remembered per browser
+  const [density, setDensity] = useState<'comfortable' | 'compact'>('comfortable')
+  useEffect(() => { try { if (localStorage.getItem('cts-density') === 'compact') setDensity('compact') } catch { /* storage blocked */ } }, [])
+  const setDensityPersist = (d: 'comfortable' | 'compact') => { setDensity(d); try { localStorage.setItem('cts-density', d) } catch { /* storage blocked */ } }
   const copyViewLink = async () => {
     try {
       await navigator.clipboard.writeText(window.location.href)
       setCopied(true)
+      toast.show({ text: 'คัดลอกลิงก์แล้ว ส่งให้ทีมเปิดแล้วจะเห็นตัวกรองแบบเดียวกัน' })
       setTimeout(() => setCopied(false), 1500)
     } catch { /* clipboard blocked — the address bar has the same link */ }
   }
@@ -365,6 +387,7 @@ export default function DashboardPage() {
       link.click()
       link.remove()
       window.URL.revokeObjectURL(url)
+      toast.show({ text: `ดาวน์โหลด ${data?.name || 'report'}.csv แล้ว` })
     } catch {
       await notify({ title: 'Export CSV ไม่สำเร็จ', message: 'ลองอีกครั้ง ถ้ายังไม่ได้ให้ออกจากระบบแล้วเข้าใหม่', tone: 'danger' })
     } finally {
@@ -384,10 +407,26 @@ export default function DashboardPage() {
   if (!data) return (
     <div className="min-h-screen bg-paper">
       <AppNav />
-      <div className="mx-auto max-w-[1240px] px-4 sm:px-8 py-10 space-y-4">
-        <div className="h-9 w-2/3 rounded bg-sunken animate-pulse" />
-        <div className="h-20 rounded bg-sunken animate-pulse" />
-        <div className="h-64 rounded bg-sunken animate-pulse" />
+      {/* same shapes as the page, so nothing jumps when the data arrives */}
+      <div className="mx-auto max-w-[1240px] animate-pulse space-y-10 px-4 py-8 sm:px-8 lg:py-10" aria-busy="true" aria-label="กำลังโหลด report">
+        <div>
+          <div className="mb-3 h-4 w-20 rounded bg-sunken" />
+          <div className="flex flex-wrap items-end justify-between gap-4">
+            <div className="space-y-2"><div className="h-8 w-72 rounded bg-sunken" /><div className="h-4 w-96 max-w-full rounded bg-sunken" /></div>
+            <div className="flex gap-2">{[96, 150, 120, 120].map(w => <div key={w} className="h-8 rounded-md bg-sunken" style={{ width: w }} />)}</div>
+          </div>
+        </div>
+        <div>
+          <div className="h-9 w-[30rem] max-w-full rounded bg-sunken" />
+          <div className="mt-3 h-4 w-[38rem] max-w-full rounded bg-sunken" />
+          <div className="mt-6 grid grid-cols-2 overflow-hidden rounded-lg border border-line bg-surface sm:grid-cols-3 lg:grid-cols-6">
+            {[0, 1, 2, 3, 4, 5].map(i => <div key={i} className="space-y-2 border-line px-4 py-3.5 [&:not(:first-child)]:border-l"><div className="h-3 w-16 rounded bg-sunken" /><div className="h-6 w-10 rounded bg-sunken" /></div>)}
+          </div>
+        </div>
+        <div className="flex gap-6 border-b border-line pb-3">{[56, 48, 110, 56].map(w => <div key={w} className="h-4 rounded bg-sunken" style={{ width: w }} />)}</div>
+        <div className="panel grid gap-x-10 gap-y-7 p-6 md:grid-cols-2 lg:grid-cols-3">
+          {[0, 1, 2, 3, 4, 5].map(i => <div key={i} className="space-y-2.5"><div className="h-4 w-28 rounded bg-sunken" />{[0, 1, 2].map(j => <div key={j} className="h-3 rounded bg-sunken" />)}</div>)}
+        </div>
       </div>
     </div>
   )
@@ -402,14 +441,14 @@ export default function DashboardPage() {
   const oldest = ages[0]
   const toggleIn = (list: string[], v: string) => (list.includes(v) ? list.filter(x => x !== v) : [...list, v])
   const pickAndShow = (patch: Parameters<typeof setFilters>[0]) => {
-    setFilters(patch)
-    document.getElementById('issue-table')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    setFilters({ ...patch, tab: 'tickets' })
+    setTimeout(() => document.getElementById('dash-tab-tickets')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 0)
   }
   const thaiDate = (d: string | Date) => new Date(d).toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: 'numeric' })
   const thaiDateTime = (d: string | Date) => new Date(d).toLocaleString('th-TH', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
 
   const ledger: Array<{ label: string; value: string; tone?: 'attention' | 'danger'; onClick?: () => void; hint?: string }> = [
-    { label: 'Tickets ใน report', value: totalTickets.toLocaleString() },
+    { label: 'ticket ใน report', value: totalTickets.toLocaleString() },
     { label: 'ปิดแล้ว', value: `${pct(closedN, totalTickets)}%`, hint: `${closedN} ใบ` },
     { label: 'ยังเปิดอยู่', value: openN.toLocaleString() },
     { label: 'ค้างเกิน 14 วัน', value: over14.toLocaleString(), tone: over14 ? 'attention' : undefined },
@@ -427,9 +466,9 @@ export default function DashboardPage() {
 
       <main className="mx-auto max-w-[1240px] px-4 py-8 sm:px-8 lg:py-10 space-y-10">
         <PageHeader
-          back={{ href: '/', label: 'Reports' }}
+          back={{ href: '/', label: 'รายงาน' }}
           title={name}
-          description={<>sync เมื่อ {thaiDate(createdAt)}{data.refreshedAt && <>, รีเฟรชจาก Jira ล่าสุด {thaiDateTime(data.refreshedAt)}</>}</>}
+          description={<>ดึงข้อมูลเมื่อ {thaiDate(createdAt)}{data.refreshedAt && <>, รีเฟรชจาก Jira ล่าสุด {thaiDateTime(data.refreshedAt)}</>}</>}
           actions={
             <>
               <button onClick={handleExportCsv} disabled={exportingCsv} aria-busy={exportingCsv} className="btn">
@@ -485,7 +524,7 @@ export default function DashboardPage() {
                   done: false,
                   title: 'สรุป Root Cause ที่เกิดซ้ำด้วย AI',
                   note: 'ข้ามได้ถ้าไม่ได้เปิดใช้ AI',
-                  action: <button onClick={() => document.getElementById('root-cause-ai')?.scrollIntoView({ behavior: 'smooth' })} className="btn">ไปที่การ์ด AI</button>,
+                  action: <button onClick={() => { setFilters({ tab: 'overview' }); setTimeout(() => document.getElementById('root-cause-ai')?.scrollIntoView({ behavior: 'smooth' }), 50) }} className="btn">ไปที่การ์ด AI</button>,
                 },
                 {
                   done: false,
@@ -512,7 +551,7 @@ export default function DashboardPage() {
         {/* Headline: the week in one sentence */}
         <section>
           <p className="max-w-[40rem] text-balance text-[26px] font-semibold leading-[1.35] tracking-[-0.01em] sm:text-[32px]">
-            <span className="num">{totalTickets.toLocaleString()}</span> tickets ใน report นี้
+            <span className="num">{totalTickets.toLocaleString()}</span> ticket ใน report นี้
             ปิดแล้ว <span className="num">{closedN.toLocaleString()}</span> ยังเปิดอยู่ <span className="num">{openN.toLocaleString()}</span>
           </p>
           <p className="mt-2 max-w-[46rem] text-[15px] leading-relaxed text-muted">
@@ -541,6 +580,21 @@ export default function DashboardPage() {
           </dl>
         </section>
 
+        <Tabs
+          idPrefix="dash"
+          sticky
+          active={tab}
+          onChange={id => setFilters({ tab: id as DashTab })}
+          tabs={[
+            { id: 'overview', label: 'ภาพรวม' },
+            { id: 'tickets', label: 'ticket', count: filteredTickets.length, tone: incompleteCount ? 'attention' : undefined },
+            { id: 'health', label: 'SLA และการส่งต่อ' },
+            { id: 'trends', label: 'แนวโน้ม' },
+          ]}
+        />
+
+        {tab === 'overview' && (
+          <div id="dash-panel-overview" role="tabpanel" aria-labelledby="dash-tab-overview" className="space-y-10">
         {/* Needs attention */}
         {(incompleteCount > 0 || l3N > 0) && (
           <section aria-labelledby="attention-title">
@@ -551,7 +605,7 @@ export default function DashboardPage() {
                   <div className="flex items-start gap-3">
                     <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-attention" aria-hidden />
                     <div>
-                      <p className="text-[14px] font-medium">{incompleteCount} tickets ยังกรอกข้อมูลไม่ครบ</p>
+                      <p className="text-[14px] font-medium">{incompleteCount} ticket ยังกรอกข้อมูลไม่ครบ</p>
                       <p className="text-[13px] text-muted">ขาด BU, Type of Issue, Root Cause หรือ Resolution อย่างใดอย่างหนึ่ง</p>
                     </div>
                   </div>
@@ -602,15 +656,6 @@ export default function DashboardPage() {
           </div>
         </section>
 
-        {/* Time-based views */}
-        <section className="space-y-5" aria-label="แนวโน้มและอายุ ticket">
-          <TrendChart tickets={data.tickets} />
-          <AgingPanel tickets={data.tickets} asOf={asOf} onOpenTicket={key => openTicket(key)} />
-          <FlowPanel tickets={data.tickets} canRefresh={canEdit} onRefresh={handleRefresh} refreshing={refreshing} />
-          <SlaPanel tickets={data.tickets} asOf={asOf} isAdmin={isAdmin} onOpenTicket={key => openTicket(key)} />
-          <EscalationPanel tickets={data.tickets} canRefresh={canEdit} onRefresh={handleRefresh} refreshing={refreshing} />
-        </section>
-
         {/* Frequency by category */}
         <section aria-labelledby="freq-title">
           <h2 id="freq-title" className="section-title mb-3">ความถี่ตามหมวดปัญหา</h2>
@@ -622,7 +667,7 @@ export default function DashboardPage() {
                   <th className="px-4 py-2 font-medium">หมวด</th>
                   <th className="px-4 py-2 font-medium text-right">จำนวน</th>
                   <th className="px-4 py-2 font-medium text-right">สัดส่วน</th>
-                  <th className="px-4 py-2 font-medium">Tickets</th>
+                  <th className="px-4 py-2 font-medium">ticket</th>
                 </tr>
               </thead>
               <tbody>
@@ -651,6 +696,10 @@ export default function DashboardPage() {
 
         <div id="root-cause-ai" className="scroll-mt-20"><RootCauseInsights reportId={id} /></div>
 
+          </div>
+        )}
+        {tab === 'tickets' && (
+          <div id="dash-panel-tickets" role="tabpanel" aria-labelledby="dash-tab-tickets" className="space-y-10">
         {/* Pinned tickets */}
         {highlighted.size > 0 && (
           <section aria-labelledby="pinned-title">
@@ -685,7 +734,7 @@ export default function DashboardPage() {
         <section id="issue-table" aria-labelledby="issues-title" className="scroll-mt-20">
           <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
             <div>
-              <h2 id="issues-title" className="section-title">Tickets</h2>
+              <h2 id="issues-title" className="section-title">ticket ทั้งหมด</h2>
               <p className="section-note num">แสดง {filteredTickets.length} จาก {totalTickets}</p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
@@ -693,7 +742,7 @@ export default function DashboardPage() {
                 type="search"
                 value={search}
                 onChange={e => setSearch(e.target.value)}
-                placeholder="ค้นหา key, summary, root cause"
+                placeholder="ค้นหา key, summary, root cause  ( / )"
                 aria-label="ค้นหา ticket"
                 className="field w-64"
               />
@@ -703,6 +752,14 @@ export default function DashboardPage() {
               />
               <button onClick={copyViewLink} className="btn" title="คัดลอกลิงก์ที่มีตัวกรองนี้ ส่งให้ทีมเปิดแล้วเห็นแบบเดียวกัน">
                 {copied ? 'คัดลอกแล้ว' : 'คัดลอกลิงก์'}
+              </button>
+              <button
+                onClick={() => setDensityPersist(density === 'compact' ? 'comfortable' : 'compact')}
+                aria-pressed={density === 'compact'}
+                title="แสดงแถวแบบแน่น เห็น ticket ได้มากขึ้นในหนึ่งหน้าจอ"
+                className="btn hidden sm:inline-flex"
+              >
+                {density === 'compact' ? 'แถวปกติ' : 'แถวแน่น'}
               </button>
               {canEdit && (
                 <button
@@ -765,8 +822,27 @@ export default function DashboardPage() {
 
             {hasActiveFilterOrSearch && <div className="border-b border-line p-4"><FilteredInsights tickets={filteredTickets} /></div>}
 
-            <div className="overflow-x-auto">
-              <table className="text-[13px]" style={{ tableLayout: 'fixed', width: Object.values(colWidths).reduce((a, b) => a + b, 0) + 60 }}>
+            {/* phones: one card per ticket */}
+            <ul className="divide-y divide-line sm:hidden" data-testid="ticket-cards">
+              {filteredTickets.map(t => (
+                <li key={t.key}>
+                  <button type="button" onClick={() => openTicket(t.key)} className={`flex w-full flex-col gap-1 px-4 py-3 text-left ${highlighted.has(t.key) ? 'bg-accent-soft' : ''}`}>
+                    <span className="flex items-center justify-between gap-2">
+                      <span className="key text-[13px] text-accent">{t.key}</span>
+                      <span className={`chip ${statusBadge(t.status)}`}>{t.status}</span>
+                    </span>
+                    <span className="text-[14px] text-ink">{t.summary || '—'}</span>
+                    <span className="text-[12px] text-muted">{[t.businessUnit, t.typeOfIssue].filter(Boolean).join(' · ') || 'ยังไม่ระบุ BU / Type'}</span>
+                    {missingFields(t).length > 0 && <span className="text-[12px] text-attention">ยังไม่กรอก {missingFields(t).join(', ')}</span>}
+                  </button>
+                </li>
+              ))}
+              {!filteredTickets.length && <li className="px-4 py-8 text-center text-[13px] text-muted">ไม่มี ticket ที่ตรงกับตัวกรองนี้</li>}
+            </ul>
+
+            {/* wider screens: the table scrolls inside the panel so its header stays in view */}
+            <div className="hidden max-h-[calc(100vh-180px)] overflow-auto sm:block">
+              <table className={`text-[13px] ${density === 'compact' ? 'density-compact' : ''}`} style={{ tableLayout: 'fixed', width: Object.values(colWidths).reduce((a, b) => a + b, 0) + 60 }}>
                 <colgroup>
                   <col style={{ width: colWidths.key }} />
                   <col style={{ width: colWidths.summary }} />
@@ -778,7 +854,7 @@ export default function DashboardPage() {
                   <col style={{ width: colWidths.deployDate }} />
                   <col style={{ width: 50 }} />
                 </colgroup>
-                <thead className="bg-sunken">
+                <thead className="sticky top-0 z-10 bg-sunken shadow-[0_1px_0_var(--line)]">
                   <tr className="border-b border-line">
                     <SortableHeader label="Key"        sortKey="key"          activeKey={sortKey} dir={sortDir} onSort={handleSort} onResizeStart={startResize('key')} />
                     <SortableHeader label="Summary"    sortKey="summary"      activeKey={sortKey} dir={sortDir} onSort={handleSort} onResizeStart={startResize('summary')} />
@@ -858,8 +934,23 @@ export default function DashboardPage() {
               </table>
             </div>
           </div>
-          <p className="mt-2 text-[12px] text-faint">คลิกแถวเพื่อเปิดรายละเอียด ลากขอบหัวตารางเพื่อปรับความกว้าง ในหน้าต่าง ticket ใช้ปุ่มลูกศรซ้ายขวาเพื่อเลื่อนใบ</p>
+          <p className="mt-2 text-[12px] text-faint">คลิกแถวเพื่อเปิดรายละเอียด ลากขอบหัวตารางเพื่อปรับความกว้าง กด <kbd className="key">?</kbd> เพื่อดูคีย์ลัด</p>
         </section>
+          </div>
+        )}
+        {tab === 'health' && (
+          <div id="dash-panel-health" role="tabpanel" aria-labelledby="dash-tab-health" className="space-y-5">
+            <SlaPanel tickets={data.tickets} asOf={asOf} isAdmin={isAdmin} onOpenTicket={key => openTicket(key)} />
+            <EscalationPanel tickets={data.tickets} canRefresh={canEdit} onRefresh={handleRefresh} refreshing={refreshing} />
+            <AgingPanel tickets={data.tickets} asOf={asOf} onOpenTicket={key => openTicket(key)} />
+          </div>
+        )}
+        {tab === 'trends' && (
+          <div id="dash-panel-trends" role="tabpanel" aria-labelledby="dash-tab-trends" className="space-y-5">
+            <TrendChart tickets={data.tickets} />
+            <FlowPanel tickets={data.tickets} canRefresh={canEdit} onRefresh={handleRefresh} refreshing={refreshing} />
+          </div>
+        )}
       </main>
 
       {bulkOpen && data && (

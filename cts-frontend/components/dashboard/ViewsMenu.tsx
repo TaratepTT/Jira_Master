@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { createView, deleteView, listViews, type SavedView } from '@/lib/api'
-import { useDialog } from '@/components/ui/Dialog'
+import { useToast } from '@/components/ui/Toast'
 
 // "มุมมอง" — saved sets of table filters. A view stores only filters (not the report),
 // so the same view works on every week's report.
@@ -14,7 +14,7 @@ export default function ViewsMenu({
 }) {
   const [open, setOpen] = useState(false)
   const [views, setViews] = useState<SavedView[] | null>(null)
-  const { confirm } = useDialog()
+  const toast = useToast()
   const [name, setName] = useState('')
   const [shared, setShared] = useState(false)
   const [error, setError] = useState('')
@@ -42,6 +42,7 @@ export default function ViewsMenu({
       setViews(list => [...(list ?? []), v])
       setName('')
       setShared(false)
+      toast.show({ text: <>บันทึกมุมมอง <span className="font-medium">{v.name}</span> แล้ว</> })
     } catch (e: unknown) {
       setError((e as { response?: { data?: { message?: string } } })?.response?.data?.message ?? 'บันทึกไม่สำเร็จ')
     } finally {
@@ -49,14 +50,14 @@ export default function ViewsMenu({
     }
   }
 
-  const remove = async (v: SavedView) => {
-    if (!(await confirm({ title: 'ลบมุมมองนี้?', message: v.shared ? 'คนในทีมที่ใช้มุมมองนี้จะไม่เห็นอีก' : undefined, detail: v.name, confirmLabel: 'ลบมุมมอง', tone: 'danger' }))) return
-    try {
-      await deleteView(v.id)
-      setViews(list => (list ?? []).filter(x => x.id !== v.id))
-    } catch {
-      setError('ลบไม่สำเร็จ')
-    }
+  const remove = (v: SavedView) => {
+    setViews(list => (list ?? []).filter(x => x.id !== v.id))
+    toast.undoable({
+      text: <>ลบมุมมอง <span className="font-medium">{v.name}</span> แล้ว</>,
+      commit: () => deleteView(v.id),
+      onUndo: () => setViews(list => [...(list ?? []), v]),
+      onError: () => { setViews(list => [...(list ?? []), v]); toast.show({ text: 'ลบมุมมองไม่สำเร็จ', tone: 'danger' }) },
+    })
   }
 
   const mine = (views ?? []).filter(v => v.mine)

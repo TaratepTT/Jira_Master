@@ -6,6 +6,7 @@ import { getReports, deleteReport } from '@/lib/api'
 import { useAuth } from '@/components/auth/AuthContext'
 import AppShell, { PageHeader } from '@/components/layout/AppShell'
 import { useDialog } from '@/components/ui/Dialog'
+import { useToast } from '@/components/ui/Toast'
 
 interface Report { id: string; name: string; totalTickets: number; createdAt: string }
 
@@ -14,6 +15,7 @@ export default function HistoryPage() {
   const { isAdmin } = useAuth()
   const [loading, setLoading] = useState(true)
   const [deletingId, setDeletingId] = useState<string | null>(null)
+  const toast = useToast()
   const { confirm, notify } = useDialog()
 
   useEffect(() => {
@@ -22,9 +24,9 @@ export default function HistoryPage() {
 
   const handleDelete = async (id: string) => {
     const target = reports.find(r => r.id === id)
-    if (!(await confirm({ title: 'ลบ report นี้?', message: 'ticket ทั้งหมดใน report นี้จะถูกลบออกจากระบบ ลบแล้วกู้คืนไม่ได้ (ข้อมูลใน Jira ไม่ถูกแตะ)', detail: target ? <><span className="font-medium">{target.name}</span><span className="text-muted"> · {target.totalTickets.toLocaleString()} tickets</span></> : undefined, confirmLabel: 'ลบ report', tone: 'danger' }))) return
+    if (!(await confirm({ title: 'ลบ report นี้?', message: 'ticket ทั้งหมดใน report นี้จะถูกลบออกจากระบบ ลบแล้วกู้คืนไม่ได้ (ข้อมูลใน Jira ไม่ถูกแตะ)', detail: target ? <><span className="font-medium">{target.name}</span><span className="text-muted"> · {target.totalTickets.toLocaleString()} ticket</span></> : undefined, confirmLabel: 'ลบ report', tone: 'danger' }))) return
     setDeletingId(id)
-    try { await deleteReport(id); setReports(p => p.filter(r => r.id !== id)) }
+    try { await deleteReport(id); setReports(p => p.filter(r => r.id !== id)); toast.show({ text: target ? `ลบ report "${target.name}" แล้ว` : 'ลบ report แล้ว' }) }
     catch { await notify({ title: 'ลบ report ไม่สำเร็จ', message: 'ลองใหม่อีกครั้ง', tone: 'danger' }) }
     finally { setDeletingId(null) }
   }
@@ -49,7 +51,7 @@ export default function HistoryPage() {
                 </div>
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-medium text-ink">{r.name}</p>
-                  <p className="text-xs text-faint">{r.totalTickets} tickets · {new Date(r.createdAt).toLocaleDateString('th-TH', {day:'numeric',month:'short',year:'numeric'})}</p>
+                  <p className="text-xs text-faint">{r.totalTickets} ticket · {new Date(r.createdAt).toLocaleDateString('th-TH', {day:'numeric',month:'short',year:'numeric'})}</p>
                 </div>
                 <div className="flex items-center gap-2">
                   <Link href={`/dashboard/${r.id}`} className="rounded-lg bg-accent px-3 py-1.5 text-xs font-medium text-on-accent hover:bg-accent-strong transition-colors">ดู Dashboard</Link>

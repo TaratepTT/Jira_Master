@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { getReports, deleteReport } from '@/lib/api'
 import { useDialog } from '@/components/ui/Dialog'
+import { useToast } from '@/components/ui/Toast'
 
 interface Report {
   id: string
@@ -16,6 +17,7 @@ export default function RecentReports() {
   const [reports, setReports] = useState<Report[]>([])
   const [loading, setLoading] = useState(true)
   const [deletingId, setDeletingId] = useState<string | null>(null)
+  const toast = useToast()
   const { confirm, notify } = useDialog()
 
   const load = async () => {
@@ -33,11 +35,11 @@ export default function RecentReports() {
 
   const handleDelete = async (id: string) => {
     const target = reports.find(r => r.id === id)
-    if (!(await confirm({ title: 'ลบ report นี้?', message: 'ticket ทั้งหมดใน report นี้จะถูกลบออกจากระบบ ลบแล้วกู้คืนไม่ได้ (ข้อมูลใน Jira ไม่ถูกแตะ)', detail: target ? <><span className="font-medium">{target.name}</span><span className="text-muted"> · {target.totalTickets.toLocaleString()} tickets</span></> : undefined, confirmLabel: 'ลบ report', tone: 'danger' }))) return
+    if (!(await confirm({ title: 'ลบ report นี้?', message: 'ticket ทั้งหมดใน report นี้จะถูกลบออกจากระบบ ลบแล้วกู้คืนไม่ได้ (ข้อมูลใน Jira ไม่ถูกแตะ)', detail: target ? <><span className="font-medium">{target.name}</span><span className="text-muted"> · {target.totalTickets.toLocaleString()} ticket</span></> : undefined, confirmLabel: 'ลบ report', tone: 'danger' }))) return
     setDeletingId(id)
     try {
       await deleteReport(id)
-      setReports((prev) => prev.filter((r) => r.id !== id))
+      setReports((prev) => prev.filter((r) => r.id !== id)); toast.show({ text: target ? `ลบ report "${target.name}" แล้ว` : 'ลบ report แล้ว' })
     } catch {
       await notify({ title: 'ลบ report ไม่สำเร็จ', message: 'ลองใหม่อีกครั้ง', tone: 'danger' })
     } finally {
@@ -79,7 +81,7 @@ export default function RecentReports() {
           <div className="min-w-0 flex-1">
             <p className="truncate text-sm font-medium text-ink">{r.name}</p>
             <p className="text-xs text-faint">
-              {r.totalTickets} tickets ·{' '}
+              {r.totalTickets} ticket ·{' '}
               {new Date(r.createdAt).toLocaleDateString('th-TH', {
                 day: 'numeric', month: 'short', year: 'numeric',
               })}

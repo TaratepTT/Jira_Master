@@ -160,7 +160,7 @@ function ValidateScreenInner() {
   const router = useRouter()
   const params = useSearchParams()
   const jql = params.get('jql') ?? ''
-  const reportName = params.get('reportName') ?? `Jira Sync — ${new Date().toISOString().slice(0, 10)}`
+  const reportName = params.get('reportName') ?? `ดึงข้อมูล ${new Date().toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: 'numeric' })}`
 
   const [loadState, setLoadState] = useState<LoadState>({ state: 'loading' })
   const [saveState, setSaveState] = useState<SaveState>({ state: 'idle' })
@@ -374,7 +374,7 @@ function ValidateScreenInner() {
         {carryFieldCount > 0 && (
           <div className="rounded-lg border border-line bg-surface px-4 py-3 flex items-center justify-between gap-3 flex-wrap">
             <p className="text-[14px] text-ink">
-              <strong>{carryTicketCount} tickets</strong> เคยกรอกข้อมูลไว้ใน report ก่อนหน้า ({carryFieldCount} ช่อง) แต่ใน Jira ยังว่าง
+              <strong>{carryTicketCount} ticket</strong> เคยกรอกข้อมูลไว้ใน report ก่อนหน้า ({carryFieldCount} ช่อง) แต่ใน Jira ยังว่าง
               <span className="mt-0.5 block text-[13px] text-muted">
                 ค่าที่เติมจะบันทึกลง report ใหม่นี้ ไม่ได้เขียนกลับเข้า Jira ดูทีละใบได้จากปุ่ม ↺ ข้าง key
               </span>
@@ -392,7 +392,7 @@ function ValidateScreenInner() {
           <div className="rounded-lg border border-line bg-surface px-4 py-3 flex items-center justify-between gap-3 flex-wrap">
             <p className="flex items-start gap-3 text-[14px]">
               <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-attention" aria-hidden />
-              <span><strong>{invalidCount} tickets</strong> ข้อมูลไม่ครบ คลิกช่องในตารางเพื่อแก้ แล้วใบนั้นจะย้ายไปกลุ่ม &quot;ข้อมูลครบ&quot; เอง</span>
+              <span><strong>{invalidCount} ticket</strong> ข้อมูลไม่ครบ คลิกช่องในตารางเพื่อแก้ แล้วใบนั้นจะย้ายไปกลุ่ม &quot;ข้อมูลครบ&quot; เอง</span>
             </p>
             <button onClick={() => setViewFilter('invalid')} className="btn whitespace-nowrap">ดูเฉพาะใบที่ไม่ครบ</button>
           </div>

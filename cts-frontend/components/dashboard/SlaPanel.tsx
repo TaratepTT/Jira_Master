@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { getSla, saveSla, type SlaSettings } from '@/lib/api'
 import type { TicketDetail } from './types'
 import { daysBetween, fmtDays, isFinishedStatus, parseDate, pct } from './utils'
+import { useToast } from '@/components/ui/Toast'
 
 // Target days to resolve per priority (admin sets them). For resolved tickets: did they make it?
 // For open tickets: which are already over target, and which are close (75% or more used).
@@ -23,6 +24,7 @@ export default function SlaPanel({
   const [draft, setDraft] = useState<Record<string, string>>({})
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
+  const toast = useToast()
 
   useEffect(() => { getSla().then(setSla).catch(() => setSla(null)) }, [])
 
@@ -73,6 +75,7 @@ export default function SlaPanel({
     try {
       setSla(await saveSla(targets))
       setEditing(false)
+      toast.show({ text: 'บันทึกเป้าเวลาแล้ว' })
     } catch (e: unknown) {
       setError((e as { response?: { data?: { message?: string } } })?.response?.data?.message ?? 'บันทึกไม่สำเร็จ')
     } finally {

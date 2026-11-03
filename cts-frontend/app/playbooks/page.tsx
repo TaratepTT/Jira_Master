@@ -1,18 +1,20 @@
 'use client'
 
 import { Suspense, useCallback, useEffect, useState } from 'react'
-import { useSearchParams } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import AppShell, { PageHeader } from '@/components/layout/AppShell'
 import { useAuth } from '@/components/auth/AuthContext'
 import { TYPE_OF_ISSUE_OPTIONS, jiraBrowseUrl } from '@/components/dashboard/utils'
 import AdfPreview from '@/components/playbooks/AdfPreview'
 import TicketChecks from '@/components/playbooks/TicketChecks'
+import Tabs from '@/components/ui/Tabs'
+import EmptyState from '@/components/ui/EmptyState'
+import { useToast } from '@/components/ui/Toast'
 import {
   checkConfluence, saveConfluenceSettings, type ConfluencePage, type ConfluenceStatus, type PlaybookTestResult,
   createPlaybook, deletePlaybook, getPlaybookDelivery, listPlaybooks, setPlaybookFeedback, testPlaybooks, updatePlaybook,
   type Playbook, type PlaybookDelivery, type PlaybookInput, type PlaybookList,
 } from '@/lib/api'
-import { useDialog } from '@/components/ui/Dialog'
 
 const errMsg = (e: unknown, fallback: string) =>
   (e as { response?: { data?: { message?: string } } })?.response?.data?.message ?? fallback
@@ -162,7 +164,7 @@ function ConfluencePanel({ status, stats, isAdmin, onSaved }: { status: Confluen
     setBusy('save'); setMsg(null)
     try {
       await saveConfluenceSettings({ autoSend: auto, aiAssist: aiOn, minScore: Number(min) / 100, maxLinks: Number(links), spaces: spaces.split(',').map(x => x.trim()).filter(Boolean), roots: roots.split('\n').map(x => x.trim()).filter(Boolean) })
-      setMsg({ ok: true, text: 'บันทึกแล้ว' }); onSaved()
+      onSaved()
     } catch (e) { setMsg({ ok: false, text: errMsg(e, 'บันทึกไม่สำเร็จ') }) } finally { setBusy('') }
   }
   const check = async () => {
@@ -321,10 +323,47 @@ function Tester({ minScore }: { minScore: number }) {
   )
 }
 
+function RecentDeliveries({ data }: { data: PlaybookList | null }) {
+  return (
+    <div className="panel panel-pad">
+      <h2 className="section-title">ส่งล่าสุด</h2>
+      {!data || data.recent.length === 0 ? (
+        <p className="mt-2 text-[13px] text-muted">ยังไม่มีการส่งคู่มือ พอระบบเจอ ticket ที่ตรงและเปิดส่งอัตโนมัติไว้ รายการจะขึ้นที่นี่</p>
+      ) : (
+        <div className="mt-3 overflow-x-auto"><table className="w-full min-w-[640px] text-[13px]">
+          <tbody>
+            {data.recent.map(d => (
+              <tr key={d.id} className="border-b border-line last:border-b-0">
+                <td className="py-2 pr-3 text-faint num whitespace-nowrap">{fmtDateTime(d.createdAt)}</td>
+                <td className="py-2 pr-3"><a href={jiraBrowseUrl(d.ticketKey)} target="_blank" rel="noreferrer" className="key text-accent hover:underline">{d.ticketKey}</a></td>
+                <td className="py-2 pr-3 text-ink">{d.title}</td>
+                <td className="py-2 pr-3 text-muted">{d.mode === 'auto' ? 'อัตโนมัติ' : d.sentBy}</td>
+                <td className="py-2 pr-3">{d.escalation ? <span className={d.escalation === 'L1' ? 'text-ok' : 'text-muted'}>{d.escalation === 'L1' ? 'จบที่ L1' : `ไปถึง ${d.escalation}`}</span> : <span className="text-faint">—</span>}</td>
+                <td className="py-2 text-right">{d.feedback === 'helpful' ? <span className="text-ok">ตรง</span> : d.feedback === 'wrong' ? <span className="text-danger">ไม่ตรง</span> : <span className="text-faint">ยังไม่มี feedback</span>}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table></div>
+      )}
+    </div>
+  )
+}
+
 function PlaybooksInner() {
   const { canEdit, isAdmin } = useAuth()
   const params = useSearchParams()
+  const router = useRouter()
   const deliveryId = params.get('delivery')
+  const toast = useToast()
+  type PbTab = 'checks' | 'playbooks' | 'confluence' | 'test'
+  const tabParam = params.get('tab') as PbTab | null
+  const tab: PbTab = tabParam && ['checks', 'playbooks', 'confluence', 'test'].includes(tabParam) ? tabParam : 'checks'
+  const setTab = (t: PbTab) => {
+    const q = new URLSearchParams(params.toString())
+    if (t === 'checks') q.delete('tab'); else q.set('tab', t)
+    router.replace(`/playbooks${q.toString() ? `?${q}` : ''}`, { scroll: false })
+  }
+  const [hidden, setHidden] = useState<Set<string>>(new Set()) // deleted, waiting for the undo window to pass
   const [data, setData] = useState<PlaybookList | null>(null)
   const [error, setError] = useState('')
   const [editing, setEditing] = useState<Playbook | 'new' | null>(null)
@@ -335,15 +374,19 @@ function PlaybooksInner() {
   useEffect(load, [load])
 
   const [rowBusy, setRowBusy] = useState('')
-  const { confirm } = useDialog()
-  const remove = async (b: Playbook) => {
-    if (!(await confirm({ title: 'ลบคู่มือนี้?', message: 'คู่มือจะไม่ถูกแนะนำหรือส่งอีก comment ที่เคยส่งไปแล้วยังอยู่ใน Jira', detail: b.title, confirmLabel: 'ลบคู่มือ', tone: 'danger' }))) return
-    setRowBusy(`del-${b.id}`)
-    try { await deletePlaybook(b.id); load() } catch (e) { setError(errMsg(e, 'ลบไม่สำเร็จ')) } finally { setRowBusy('') }
+  // delete = hide now, really delete after the undo window
+  const remove = (b: Playbook) => {
+    setHidden(h => new Set(h).add(b.id))
+    toast.undoable({
+      text: <>ลบคู่มือ <span className="font-medium">{b.title}</span> แล้ว</>,
+      commit: async () => { await deletePlaybook(b.id); load() },
+      onUndo: () => setHidden(h => { const n = new Set(h); n.delete(b.id); return n }),
+      onError: () => { setHidden(h => { const n = new Set(h); n.delete(b.id); return n }); toast.show({ text: 'ลบคู่มือไม่สำเร็จ', tone: 'danger' }) },
+    })
   }
   const toggleAuto = async (b: Playbook) => {
     setRowBusy(`auto-${b.id}`)
-    try { await updatePlaybook(b.id, { ...b, autoSend: !b.autoSend }); load() } catch (e) { setError(errMsg(e, 'บันทึกไม่สำเร็จ')) } finally { setRowBusy('') }
+    try { await updatePlaybook(b.id, { ...b, autoSend: !b.autoSend }); load(); toast.show({ text: !b.autoSend ? `"${b.title}" ส่งอัตโนมัติแล้ว` : `"${b.title}" เปลี่ยนเป็นกดส่งเอง` }) } catch (e) { setError(errMsg(e, 'บันทึกไม่สำเร็จ')) } finally { setRowBusy('') }
   }
 
   return (
@@ -351,18 +394,39 @@ function PlaybooksInner() {
       <PageHeader
         title="คู่มือ L1"
         description="ระบบดึง ticket ใหม่จาก Jira เอง เทียบกับคู่มือที่เขียนไว้และเนื้อหาหน้า Confluence แล้วใส่ขั้นตอนหรือลิงก์ที่ตรงที่สุดเป็น comment ภายใน ให้ L1 ทำต่อเองได้ ลูกค้าไม่เห็น comment นี้"
-        actions={canEdit && !editing ? <button onClick={() => setEditing('new')} className="btn-primary">เพิ่มคู่มือ</button> : undefined}
+        actions={canEdit && !editing ? <button onClick={() => { setEditing('new'); setTab('playbooks') }} className="btn-primary">เพิ่มคู่มือ</button> : undefined}
       />
 
       {deliveryId && <FeedbackCard id={deliveryId} onDone={load} />}
 
-      <TicketChecks canEdit={canEdit} onChanged={load} />
+      <Tabs
+        idPrefix="pb"
+        className="mb-6"
+        active={tab}
+        onChange={t => setTab(t as PbTab)}
+        tabs={[
+          { id: 'checks', label: 'ticket ที่ตรวจแล้ว' },
+          { id: 'playbooks', label: 'คู่มือ', count: data ? data.playbooks.filter(b => !hidden.has(b.id)).length : null },
+          { id: 'confluence', label: 'Confluence' },
+          { id: 'test', label: 'ทดสอบ' },
+        ]}
+      />
+
+      {tab === 'checks' && (
+        <div id="pb-panel-checks" role="tabpanel" aria-labelledby="pb-tab-checks" className="space-y-6">
+          <TicketChecks canEdit={canEdit} onChanged={load} />
+          <RecentDeliveries data={data} />
+        </div>
+      )}
+
+      {tab === 'playbooks' && (
+      <div id="pb-panel-playbooks" role="tabpanel" aria-labelledby="pb-tab-playbooks">
 
       {editing && (
         <Editor
           key={editing === 'new' ? 'new' : editing.id}
           initial={editing === 'new' ? null : editing}
-          onSaved={() => { setEditing(null); load() }}
+          onSaved={() => { setEditing(null); load(); toast.show({ text: editing === 'new' ? 'เพิ่มคู่มือแล้ว' : 'บันทึกคู่มือแล้ว' }) }}
           onCancel={() => setEditing(null)}
         />
       )}
@@ -373,9 +437,11 @@ function PlaybooksInner() {
         {!data ? (
           <div className="m-4 h-24 animate-pulse rounded bg-sunken" />
         ) : data.playbooks.length === 0 ? (
-          <div className="panel-pad text-[14px] text-muted">
-            ยังไม่มีคู่มือ {canEdit ? 'เริ่มจากเรื่องที่ L1 ส่งต่อมาบ่อยที่สุด แล้วกด "เพิ่มคู่มือ"' : 'ให้ editor เพิ่มคู่มือก่อน'}
-          </div>
+          <EmptyState
+            title="ยังไม่มีคู่มือที่เขียนไว้"
+            text={canEdit ? 'เริ่มจากเรื่องที่ L1 ส่งต่อมาบ่อยที่สุด ระหว่างนี้ระบบยังค้นจาก Confluence ให้ได้' : 'ให้ editor เพิ่มคู่มือก่อน ระหว่างนี้ระบบยังค้นจาก Confluence ให้ได้'}
+            action={canEdit && !editing ? <button onClick={() => setEditing('new')} className="btn-primary">เพิ่มคู่มือแรก</button> : undefined}
+          />
         ) : (
           <table className="w-full min-w-[760px] text-[13px]" data-testid="playbook-table">
             <thead>
@@ -390,7 +456,7 @@ function PlaybooksInner() {
               </tr>
             </thead>
             <tbody>
-              {data.playbooks.map(b => {
+              {data.playbooks.filter(b => !hidden.has(b.id)).map(b => {
                 const s = data.stats.find(x => x.id === b.id)
                 return (
                   <tr key={b.id} className={`border-b border-line last:border-b-0 ${b.enabled ? '' : 'text-faint'}`}>
@@ -420,7 +486,7 @@ function PlaybooksInner() {
                     <td className="whitespace-nowrap px-4 py-2.5 text-right">
                       {canEdit && <>
                         <button onClick={() => setEditing(b)} className="btn-quiet">แก้</button>
-                        <button onClick={() => remove(b)} disabled={!!rowBusy} aria-busy={rowBusy === `del-${b.id}`} className="btn-quiet text-danger">ลบ</button>
+                        <button onClick={() => remove(b)} disabled={!!rowBusy} className="btn-quiet text-danger">ลบ</button>
                       </>}
                     </td>
                   </tr>
@@ -431,33 +497,20 @@ function PlaybooksInner() {
         )}
       </div>
 
-      {data?.confluence && <ConfluencePanel status={data.confluence} stats={data.confluence.stats} isAdmin={isAdmin} onSaved={load} />}
-
-      <div className="grid grid-cols-[minmax(0,1fr)] gap-6">
-        <Tester minScore={data?.autoMinScore ?? 0.6} />
-
-        <div className="panel panel-pad">
-          <h2 className="section-title">ส่งล่าสุด</h2>
-          {!data || data.recent.length === 0 ? (
-            <p className="mt-2 text-[13px] text-muted">ยังไม่มีการส่งคู่มือ</p>
-          ) : (
-            <div className="mt-3 overflow-x-auto"><table className="w-full min-w-[640px] text-[13px]">
-              <tbody>
-                {data.recent.map(d => (
-                  <tr key={d.id} className="border-b border-line last:border-b-0">
-                    <td className="py-2 pr-3 text-faint num whitespace-nowrap">{fmtDateTime(d.createdAt)}</td>
-                    <td className="py-2 pr-3"><a href={jiraBrowseUrl(d.ticketKey)} target="_blank" rel="noreferrer" className="key text-accent hover:underline">{d.ticketKey}</a></td>
-                    <td className="py-2 pr-3 text-ink">{d.title}</td>
-                    <td className="py-2 pr-3 text-muted">{d.mode === 'auto' ? 'อัตโนมัติ' : d.sentBy}</td>
-                    <td className="py-2 pr-3">{d.escalation ? <span className={d.escalation === 'L1' ? 'text-ok' : 'text-muted'}>{d.escalation === 'L1' ? 'จบที่ L1' : `ไปถึง ${d.escalation}`}</span> : <span className="text-faint">—</span>}</td>
-                    <td className="py-2 text-right">{d.feedback === 'helpful' ? <span className="text-ok">ตรง</span> : d.feedback === 'wrong' ? <span className="text-danger">ไม่ตรง</span> : <span className="text-faint">ยังไม่มี feedback</span>}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table></div>
-          )}
-        </div>
       </div>
+      )}
+
+      {tab === 'confluence' && (
+        <div id="pb-panel-confluence" role="tabpanel" aria-labelledby="pb-tab-confluence">
+          {data?.confluence ? <ConfluencePanel status={data.confluence} stats={data.confluence.stats} isAdmin={isAdmin} onSaved={() => { load(); toast.show({ text: 'บันทึกการตั้งค่า Confluence แล้ว' }) }} /> : <div className="panel h-40 animate-pulse" />}
+        </div>
+      )}
+
+      {tab === 'test' && (
+        <div id="pb-panel-test" role="tabpanel" aria-labelledby="pb-tab-test">
+          <Tester minScore={data?.autoMinScore ?? 0.6} />
+        </div>
+      )}
     </AppShell>
   )
 }

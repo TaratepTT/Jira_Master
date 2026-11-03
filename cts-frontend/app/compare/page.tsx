@@ -125,7 +125,7 @@ function WindowLine({ label, name, createdAt, total, range }: { label: string; n
       <p className="text-[12px] text-muted">{label}</p>
       <p className="text-sm font-medium text-ink break-words">{name}</p>
       <p className="text-xs text-muted">
-        {total} tickets, sync เมื่อ {fmtDateTime(createdAt)}
+        {total} ticket, ดึงข้อมูลเมื่อ {fmtDateTime(createdAt)}
       </p>
       <p className="text-xs text-faint">
         {range.withDate > 0 ? `ticket ถูกสร้างระหว่าง ${fmtDate(range.from)} – ${fmtDate(range.to)}` : 'ไม่มีข้อมูลวันที่สร้าง ticket'}
@@ -176,7 +176,7 @@ function CompareInner() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [baseId, currentId])
 
-  const label = (r: ReportOption) => `${r.name} (${r.totalTickets} tickets, ${fmtDate(r.createdAt)})`
+  const label = (r: ReportOption) => `${r.name} (${r.totalTickets} ticket, ${fmtDate(r.createdAt)})`
   const selectCls = 'field py-2 text-[14px]'
 
   return (

@@ -80,7 +80,7 @@ export default function AgingPanel({
                 key={b.id}
                 className="h-full first:rounded-l-full last:rounded-r-full"
                 style={{ ...bucketBg(b.id), width: `${(counts[b.id] / open) * 100}%` }}
-                title={`${b.label}: ${counts[b.id]} tickets`}
+                title={`${b.label}: ${counts[b.id]} ticket`}
               />
             ))}
           </div>

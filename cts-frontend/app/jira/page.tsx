@@ -34,7 +34,9 @@ export default function JiraSyncPage() {
   const router = useRouter()
   const { canEdit } = useAuth()
   const [jql, setJql]               = useState(PRESET_JQL[0].jql)
-  const [reportName, setReportName]  = useState(`Jira Sync — ${new Date().toLocaleDateString('th-TH', { day: 'numeric', month: 'long', year: 'numeric' })}`)
+  // names say which days the report covers ("สัปดาห์ 27 ต.ค. – 2 พ.ย. 2569"), not when the button was pressed
+  const [reportName, setReportName]  = useState(`ดึงข้อมูล ${new Date().toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: 'numeric' })}`)
+  const [nameTouched, setNameTouched] = useState(false)
   const [testState, setTestState]    = useState<TestState>({ state: 'idle' })
   const [connected, setConnected]    = useState<boolean | null>(null)
   const [showJqlHelp, setShowJqlHelp] = useState(false)
@@ -61,8 +63,13 @@ export default function JiraSyncPage() {
 
   const applyDateRange = () => {
     if (!dateFrom || !dateTo) return
-    const newJql = `created >= "${dateFrom}" AND created <= "${dateTo}" AND project = CTS ORDER BY created ASC`
+    const newJql = `created >= "${dateFrom}" AND created <= "${dateTo} 23:59" AND project = CTS ORDER BY created ASC`
     setJql(newJql)
+    if (!nameTouched) {
+      const th = (v: string, withYear = false) => new Date(`${v}T00:00:00`).toLocaleDateString('th-TH', { day: 'numeric', month: 'short', ...(withYear ? { year: 'numeric' } : {}) })
+      const days = Math.round((new Date(`${dateTo}T00:00:00`).getTime() - new Date(`${dateFrom}T00:00:00`).getTime()) / 864e5) + 1
+      setReportName(`${days === 7 ? 'สัปดาห์' : 'ช่วง'} ${th(dateFrom)} – ${th(dateTo, true)}`)
+    }
   }
 
   const testConnection = async () => {
@@ -88,7 +95,7 @@ export default function JiraSyncPage() {
   return (
     <AppShell width="narrow">
       <PageHeader
-        title="Sync จาก Jira"
+        title="ดึงข้อมูลจาก Jira"
         description={<>ดึง ticket จาก <span className="text-ink">ascendcommerce-support.atlassian.net</span> มาตรวจในขั้นถัดไปก่อน ยังไม่บันทึกเป็น report จนกว่าคุณจะยืนยัน</>}
       />
 
@@ -124,7 +131,7 @@ export default function JiraSyncPage() {
         <section className="px-5 py-4">
           <label htmlFor="report-name" className="text-[14px] font-semibold">ชื่อ report</label>
           <p className="mb-2 text-[13px] text-muted">ตั้งให้รู้ว่าเป็นรอบไหน เช่น สัปดาห์ที่ 45</p>
-          <input id="report-name" type="text" value={reportName} onChange={e => setReportName(e.target.value)} className="field py-2 text-[14px]" />
+          <input id="report-name" type="text" value={reportName} onChange={e => { setReportName(e.target.value); setNameTouched(true) }} className="field py-2 text-[14px]" />
         </section>
 
         {/* Which tickets */}

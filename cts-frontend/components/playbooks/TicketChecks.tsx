@@ -98,7 +98,16 @@ export default function TicketChecks({ canEdit, onChanged }: { canEdit: boolean;
 
       <div className="overflow-x-auto p-4 pt-2">
         {checks === null ? <div className="h-16 animate-pulse rounded bg-sunken" />
-          : shown.length === 0 ? <p className="py-3 text-[13px] text-muted">{checks.length ? 'ไม่มี ticket ในกลุ่มนี้' : 'ยังไม่มี ticket ใหม่ที่ตรวจ ระบบจะเริ่มดึงภายในไม่กี่นาทีหลัง server เปิด'}</p>
+          : shown.length === 0 ? (
+            checks.length ? <p className="py-3 text-[13px] text-muted">ไม่มี ticket ในกลุ่มนี้ <button onClick={() => setFilter('all')} className="link">ดูทั้งหมด</button></p>
+              : (
+                <div className="flex flex-wrap items-center justify-between gap-3 py-4">
+                  <div>
+                    <p className="text-[14px] font-medium text-ink">ยังไม่มี ticket ใหม่ที่ตรวจ</p>
+                    <p className="text-[13px] text-muted">ระบบดึงเองทุก {Math.max(1, Math.round((watch?.intervalMs ?? 300000) / 60000))} นาที หรือกด "ดึง ticket ใหม่ตอนนี้" ด้านบนเพื่อดูผลทันที</p>
+                  </div>
+                </div>
+              ))
           : (
             <table className="w-full min-w-[760px] text-[13px]">
               <thead>

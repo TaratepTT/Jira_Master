@@ -166,7 +166,7 @@ export default function RootCauseInsights({ reportId }: { reportId: string }) {
                         <p className="text-sm font-semibold text-ink">
                           {t.title}
                         </p>
-                        <span className="flex-shrink-0 text-[13px] text-muted num">{t.count} tickets</span>
+                        <span className="flex-shrink-0 text-[13px] text-muted num">{t.count} ticket</span>
                       </div>
                       {t.description && <p className="text-xs leading-relaxed text-muted">{t.description}</p>}
                       {t.suggestedAction && (

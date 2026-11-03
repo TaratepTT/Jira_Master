@@ -13,7 +13,7 @@
   --sunken: #f0f2f5;
   --ink: #171a21;
   --muted: #5b6372;
-  --faint: #878f9c;
+  --faint: #656d7b; /* 4.6:1 on --sunken, passes WCAG AA for small text */
   --line: #e4e7ec;
   --line-strong: #cfd4dc;
   --accent: #2d5be3;
@@ -39,7 +39,7 @@
   --sunken: #11151b;
   --ink: #e8ebf0;
   --muted: #9aa3b2;
-  --faint: #6b7484;
+  --faint: #7f8898; /* 4.9:1 on --surface */
   --line: #242b35;
   --line-strong: #333c48;
   --accent: #7c9bff;
@@ -136,6 +136,10 @@
   /* confirm / notice dialog: one short scale-in when it opens (it answers the person's click) */
   .dialog-backdrop { animation: cts-fade 140ms ease-out; }
   .dialog-panel { animation: cts-pop 160ms cubic-bezier(0.2, 0.9, 0.3, 1.2); }
+  .side-panel { animation: cts-slide 180ms cubic-bezier(0.2, 0.8, 0.2, 1); }
+  .toast { animation: cts-pop 160ms ease-out; }
+  .density-compact td { padding-top: 0.3rem; padding-bottom: 0.3rem; }
+  .density-compact td .chip { padding-top: 0; padding-bottom: 0; }
   .link { @apply text-accent underline-offset-2 hover:underline; }
 
   /* form controls */
@@ -160,3 +164,4 @@
 
 @keyframes cts-fade { from { opacity: 0; } }
 @keyframes cts-pop { from { opacity: 0; transform: translateY(6px) scale(0.97); } }
+@keyframes cts-slide { from { opacity: 0.6; transform: translateX(24px); } }
