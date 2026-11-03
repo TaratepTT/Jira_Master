@@ -19,7 +19,8 @@ import jiraOAuthRouter from './routes/jiraOAuth.js'
 import viewsRouter from './routes/views.js'
 import settingsRouter from './routes/settings.js'
 import playbooksRouter from './routes/playbooks.js'
-import hooksRouter, { startPlaybookSweeper } from './routes/hooks.js'
+import hooksRouter from './routes/hooks.js'
+import { startTicketWatcher } from './lib/watcher.js'
 import { errorHandler } from './middleware/errorHandler.js'
 import { requireAuth, requireRole } from './middleware/requireAuth.js'
 import { withUserJira } from './middleware/jiraUser.js'
@@ -115,7 +116,7 @@ app.use('/api/auth/register', registerLimiter)
 // ── Public routes (no auth required) ────────────────────────────
 app.use('/api/health', healthRouter)
 app.use('/api/auth',   authRouter)
-app.use('/api/hooks',  hooksRouter) // Jira Automation webhook, guarded by X-CTS-Secret
+app.use('/api/hooks',  hooksRouter) // optional Jira Automation webhook, guarded by X-CTS-Secret
 
 // ── Protected routes (auth required) ────────────────────────────
 // viewer = read-only · editor = sync/edit/comment/upload · admin = + delete reports & manage users
@@ -147,7 +148,7 @@ app.listen(PORT, () => {
   console.log(`[server] running on http://localhost:${PORT}`)
   console.log(`[server] allowed origins: ${ALLOWED_ORIGINS.join(', ')}`)
   console.log(`[server] env: ${process.env.NODE_ENV ?? 'development'}`)
-  startPlaybookSweeper()
+  startTicketWatcher()
 })
 
 export default app

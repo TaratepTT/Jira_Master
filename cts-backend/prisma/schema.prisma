@@ -203,3 +203,18 @@ model PlaybookDelivery {
   @@index([ticketKey])
   @@map("playbook_deliveries")
 }
+
+/// Every new ticket the watcher looked at, and what it decided (sent / suggested / no match)
+model TicketCheck {
+  ticketKey       String    @id @map("ticket_key")
+  summary         String
+  decision        String    // sent_playbook | sent_confluence | suggested | low_confidence | no_match | already_sent | error
+  detail          String?
+  candidates      Json?     // [{ kind, id, title, url, score, reasons }]
+  trigger         String    // watch | webhook | manual
+  ticketCreatedAt DateTime? @map("ticket_created_at")
+  checkedAt       DateTime  @default(now()) @map("checked_at")
+
+  @@index([checkedAt])
+  @@map("ticket_checks")
+}

@@ -2,7 +2,7 @@ import prisma from './prisma.js'
 import { normalizeText, textGrams, similarity, knownTickets, findSimilar } from './similar.js'
 import { addInternalComment, fetchTicketForPlaybook, type PlaybookTicket } from './jira.js'
 import { recordAudit, type AuditActor } from './audit.js'
-import { confluenceConfigured, readConfluenceSettings, searchConfluence, type ConfluencePage } from './confluence.js'
+import { confluenceCandidates, confluenceConfigured, readConfluenceSettings, type ConfluencePage } from './confluence.js'
 
 // ══════════════════════════════════════════════════════════════
 // Playbooks (คู่มือ L1): match a ticket to a manual, post it as an internal comment
@@ -215,31 +215,94 @@ export async function sendPlaybook(
   return { ok: true, deliveryId: delivery.id, playbookId: book.id, title: book.title }
 }
 
-// ── Automatic: a new ticket was created in Jira ────────────────
-const processing = new Set<string>()
-export async function autoHandleTicket(key: string): Promise<SendResult> {
-  if (processing.has(key)) return { ok: false, reason: 'already_sent', message: 'กำลังทำอยู่' }
-  processing.add(key)
-  try {
-    const already = await prisma.playbookDelivery.findFirst({ where: { ticketKey: key } })
-    if (already) return { ok: false, reason: 'already_sent', message: 'ticket นี้ได้คู่มือไปแล้ว' }
-    const ticket = await fetchTicketForPlaybook(key)
-    if (!ticket) return { ok: false, reason: 'not_found', message: 'ไม่พบ ticket ใน Jira' }
-    // 1) a playbook written for this kind of ticket wins
-    const books = (await loadPlaybooks()).filter(b => b.autoSend)
-    const best = matchPlaybooks(ticket, books)[0]
-    if (best && best.score >= AUTO_MIN_SCORE) return await sendPlaybook(ticket, best.playbook, best.score, 'auto', undefined)
-    // 2) otherwise search Confluence
-    if (confluenceConfigured()) {
+// ══════════════════════════════════════════════════════════════
+// One ticket, start to finish: read it from Jira, match playbooks, recheck Confluence pages,
+// decide, send if allowed, and record the decision (ticket_checks) for the คู่มือ L1 page.
+// ══════════════════════════════════════════════════════════════
+
+export type Decision = 'sent_playbook' | 'sent_confluence' | 'suggested' | 'low_confidence' | 'no_match' | 'already_sent' | 'error'
+export interface Candidate { kind: 'playbook' | 'confluence'; id: string; title: string; url: string | null; score: number; reasons: string[]; autoSend?: boolean }
+export interface CheckResult { key: string; decision: Decision; detail: string; candidates: Candidate[]; send?: SendResult }
+
+const DECISION_TEXT: Record<Decision, string> = {
+  sent_playbook: 'ส่งคู่มือแล้ว', sent_confluence: 'ส่งลิงก์ Confluence แล้ว', suggested: 'ตรงพอ แต่ยังไม่ได้เปิดส่งอัตโนมัติ',
+  low_confidence: 'มีหน้าที่ใกล้เคียง แต่ไม่ตรงพอจะส่งเอง', no_match: 'ไม่พบคู่มือที่เกี่ยวข้อง', already_sent: 'เคยส่งคู่มือแล้ว', error: 'ตรวจไม่สำเร็จ',
+}
+export const decisionText = (d: string) => DECISION_TEXT[d as Decision] ?? d
+
+/** Everything that could help with this ticket, best first (no sending) */
+export async function evaluateTicket(ticket: PlaybookTicket): Promise<{ candidates: Candidate[]; pages: ConfluencePage[]; best: PlaybookMatch | undefined; cfError?: string }> {
+  const books = await loadPlaybooks()
+  const matches = matchPlaybooks(ticket, books)
+  let pages: ConfluencePage[] = []
+  let cfError: string | undefined
+  if (confluenceConfigured()) {
+    try {
       const cs = await readConfluenceSettings()
-      if (cs.autoSend) {
-        const pages = (await searchConfluence(ticket.summary, ticket.description, cs.spaces)).filter(x => x.score >= cs.minScore).slice(0, cs.maxLinks)
-        if (pages.length) return await sendConfluencePages(ticket, pages, 'auto', undefined)
-        return { ok: false, reason: 'low_score', message: 'ไม่พบหน้า Confluence ที่ตรงพอ' }
+      pages = await confluenceCandidates(ticket.summary, ticket.description, cs.spaces)
+    } catch (err) {
+      const st = (err as { response?: { status?: number } })?.response?.status
+      cfError = `ค้น Confluence ไม่สำเร็จ${st ? ` (HTTP ${st})` : ''}`
+    }
+  }
+  const candidates: Candidate[] = [
+    ...matches.slice(0, 3).map(m => ({ kind: 'playbook' as const, id: m.playbook.id, title: m.playbook.title, url: m.playbook.confluenceUrl, score: m.score, reasons: m.reasons, autoSend: m.playbook.autoSend })),
+    ...pages.map(pg => ({ kind: 'confluence' as const, id: pg.id, title: pg.title, url: pg.url, score: pg.score, reasons: pg.reasons ?? [] })),
+  ]
+  return { candidates, pages, best: matches[0], cfError }
+}
+
+const processing = new Set<string>()
+
+/**
+ * mode 'auto'  : send when the rules allow it (watcher, webhook)
+ * mode 'check' : only look and record (the "ตรวจใหม่" button)
+ */
+export async function processTicket(key: string, trigger: 'watch' | 'webhook' | 'manual', mode: 'auto' | 'check' = 'auto'): Promise<CheckResult> {
+  if (processing.has(key)) return { key, decision: 'already_sent', detail: 'กำลังตรวจอยู่', candidates: [] }
+  processing.add(key)
+  const record = async (r: CheckResult, ticket?: PlaybookTicket) => {
+    const created = ticket?.created ? new Date(ticket.created) : null
+    const data = {
+      summary: (ticket?.summary ?? '').slice(0, 500), decision: r.decision, detail: r.detail.slice(0, 500),
+      candidates: r.candidates.slice(0, 6) as unknown as object, trigger,
+      ticketCreatedAt: created && !isNaN(created.getTime()) ? created : null, checkedAt: new Date(),
+    }
+    await prisma.ticketCheck.upsert({ where: { ticketKey: key }, create: { ticketKey: key, ...data }, update: data }).catch(err => {
+      console.error('[playbook] could not record check:', (err as Error)?.message)
+    })
+    return r
+  }
+  try {
+    const ticket = await fetchTicketForPlaybook(key)
+    if (!ticket) return await record({ key, decision: 'error', detail: 'ไม่พบ ticket ใน Jira', candidates: [] })
+    const { candidates, pages, best, cfError } = await evaluateTicket(ticket)
+    const sentBefore = await prisma.playbookDelivery.findFirst({ where: { ticketKey: key } })
+    const cs = await readConfluenceSettings()
+    const goodPages = pages.filter(x => x.score >= cs.minScore).slice(0, cs.maxLinks)
+    const bookOk = !!best && best.score >= AUTO_MIN_SCORE
+
+    if (mode === 'auto' && !sentBefore) {
+      // 1) a playbook written for this kind of ticket wins, 2) then the rechecked Confluence pages
+      if (bookOk && best!.playbook.autoSend) {
+        const send = await sendPlaybook(ticket, best!.playbook, best!.score, 'auto', undefined)
+        return await record({ key, decision: send.ok ? 'sent_playbook' : 'error', detail: send.ok ? `ส่ง "${best!.playbook.title}"` : send.message, candidates, send }, ticket)
+      }
+      if (cs.autoSend && goodPages.length) {
+        const send = await sendConfluencePages(ticket, goodPages, 'auto', undefined)
+        return await record({ key, decision: send.ok ? 'sent_confluence' : 'error', detail: send.ok ? `ส่ง ${goodPages.map(x => `"${x.title}"`).join(', ')}` : send.message, candidates, send }, ticket)
       }
     }
-    if (!best) return { ok: false, reason: 'no_match', message: 'ไม่มีคู่มือที่ตรง' }
-    return { ok: false, reason: 'low_score', message: `คู่มือที่ใกล้สุดได้คะแนน ${Math.round(best.score * 100)}% ต่ำกว่าเกณฑ์ส่งอัตโนมัติ` }
+    if (sentBefore) return await record({ key, decision: 'already_sent', detail: 'ticket นี้ได้คู่มือไปแล้ว', candidates }, ticket)
+    if (bookOk || goodPages.length) {
+      const what = bookOk ? `คู่มือ "${best!.playbook.title}"` : `หน้า "${goodPages[0].title}"`
+      return await record({ key, decision: 'suggested', detail: `${what} ตรงพอ${mode === 'check' ? '' : ' แต่ยังไม่ได้เปิดส่งอัตโนมัติ'}`, candidates }, ticket)
+    }
+    if (candidates.length) return await record({ key, decision: 'low_confidence', detail: `ใกล้สุด ${Math.round(Math.max(...candidates.map(c => c.score)) * 100)}% ต่ำกว่าเกณฑ์`, candidates }, ticket)
+    return await record({ key, decision: cfError ? 'error' : 'no_match', detail: cfError ?? 'ไม่พบคู่มือหรือหน้า Confluence ที่เกี่ยวข้อง', candidates }, ticket)
+  } catch (err) {
+    const st = (err as { response?: { status?: number } })?.response?.status
+    return await record({ key, decision: 'error', detail: `อ่าน ticket จาก Jira ไม่สำเร็จ${st ? ` (HTTP ${st})` : ''}`, candidates: [] })
   } finally {
     processing.delete(key)
   }

@@ -6,6 +6,7 @@ import AppShell, { PageHeader } from '@/components/layout/AppShell'
 import { useAuth } from '@/components/auth/AuthContext'
 import { TYPE_OF_ISSUE_OPTIONS, jiraBrowseUrl } from '@/components/dashboard/utils'
 import AdfPreview from '@/components/playbooks/AdfPreview'
+import TicketChecks from '@/components/playbooks/TicketChecks'
 import {
   checkConfluence, saveConfluenceSettings, type ConfluencePage, type ConfluenceStatus, type PlaybookTestResult,
   createPlaybook, deletePlaybook, getPlaybookDelivery, listPlaybooks, setPlaybookFeedback, testPlaybooks, updatePlaybook,
@@ -131,7 +132,8 @@ function ConfluenceList({ pages, minScore }: { pages: ConfluencePage[]; minScore
           <span className="min-w-0">
             <a href={pg.url} target="_blank" rel="noreferrer" className="block text-[13px] text-accent hover:underline">{pg.title}</a>
             {pg.excerpt && <span className="block truncate text-[12px] text-muted">{pg.excerpt}</span>}
-            {pg.matched.length > 0 && <span className="block text-[12px] text-faint">เจอคำ: {pg.matched.join(', ')}</span>}
+            {(pg.reasons?.length ?? 0) > 0 ? <span className="block text-[12px] text-faint">{pg.reasons!.join(' · ')}</span>
+              : pg.matched.length > 0 && <span className="block text-[12px] text-faint">เจอคำ: {pg.matched.join(', ')}</span>}
           </span>
         </li>
       ))}
@@ -310,21 +312,13 @@ function PlaybooksInner() {
     <AppShell>
       <PageHeader
         title="คู่มือ L1"
-        description="เมื่อมี ticket ใหม่ใน Jira ระบบจะหาคู่มือที่ตรงเรื่อง แล้วใส่ขั้นตอนกับลิงก์ Confluence เป็น comment ภายใน ให้ L1 ทำต่อเองได้ ลูกค้าไม่เห็น comment นี้"
+        description="ระบบดึง ticket ใหม่จาก Jira เอง เทียบกับคู่มือที่เขียนไว้และเนื้อหาหน้า Confluence แล้วใส่ขั้นตอนหรือลิงก์ที่ตรงที่สุดเป็น comment ภายใน ให้ L1 ทำต่อเองได้ ลูกค้าไม่เห็น comment นี้"
         actions={canEdit && !editing ? <button onClick={() => setEditing('new')} className="btn-primary">เพิ่มคู่มือ</button> : undefined}
       />
 
       {deliveryId && <FeedbackCard id={deliveryId} onDone={load} />}
 
-      {data && !data.webhookEnabled && (
-        <div className="panel panel-pad mb-6 border-attention" role="note">
-          <p className="text-[14px] font-medium">ยังไม่ได้เปิดการส่งอัตโนมัติ</p>
-          <p className="mt-1 text-[13px] text-muted">
-            ตั้งค่า <span className="key">JIRA_WEBHOOK_SECRET</span> บน Render แล้วให้ Jira admin สร้าง Automation rule ตามคู่มือติดตั้ง (PLAYBOOKS-README.md)
-            ระหว่างนี้ยังกดส่งคู่มือเองจากหน้าต่าง ticket ได้
-          </p>
-        </div>
-      )}
+      <TicketChecks canEdit={canEdit} onChanged={load} />
 
       {editing && (
         <Editor
@@ -401,7 +395,7 @@ function PlaybooksInner() {
 
       {data?.confluence && <ConfluencePanel status={data.confluence} stats={data.confluence.stats} isAdmin={isAdmin} onSaved={load} />}
 
-      <div className="grid gap-6">
+      <div className="grid grid-cols-[minmax(0,1fr)] gap-6">
         <Tester minScore={data?.autoMinScore ?? 0.6} />
 
         <div className="panel panel-pad">
@@ -409,7 +403,7 @@ function PlaybooksInner() {
           {!data || data.recent.length === 0 ? (
             <p className="mt-2 text-[13px] text-muted">ยังไม่มีการส่งคู่มือ</p>
           ) : (
-            <table className="mt-3 w-full text-[13px]">
+            <div className="mt-3 overflow-x-auto"><table className="w-full min-w-[640px] text-[13px]">
               <tbody>
                 {data.recent.map(d => (
                   <tr key={d.id} className="border-b border-line last:border-b-0">
@@ -422,7 +416,7 @@ function PlaybooksInner() {
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </table></div>
           )}
         </div>
       </div>

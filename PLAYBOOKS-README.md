@@ -5,46 +5,61 @@ When someone opens a new ticket in project CTS, the system finds a matching manu
 solved tickets. L1 reads it and does the work without escalating. Customers on the JSM portal
 **do not see** this comment: it is sent with the `sd.public.comment = internal` property.
 
-## How it works
+## How it works (no Jira admin needed)
 
-1. Jira Automation rule "Work item created" → calls `POST /api/hooks/jira/issue-created`
-2. The backend replies 202 straight away. About 20 seconds later it fetches the ticket with the shared token (so custom fields have time to fill in).
-3. It matches the summary and description against every playbook that is set to "send automatically".
-   - A keyword found in the summary scores 60% or more, which is enough to auto-send.
-   - A keyword found only in the description scores less and is not auto-sent.
-4. It adds an internal comment. **It never sends twice** (unique playbook+ticket constraint), even if the webhook fires more than once.
-5. A sweeper runs every 10 minutes and checks tickets from the last 2 hours. This catches webhooks missed while Render was asleep.
+1. **The system pulls new tickets from Jira itself.** Every 5 minutes it uses the shared API token to fetch tickets created in CTS since its last run. If the server was asleep, it looks back up to 24 hours.
+2. **It reads each whole ticket**: summary, description, Type of Issue and system.
+3. **It looks for a match**:
+   - First it checks the playbooks written in the app (keywords).
+   - It also searches Confluence for up to 10 candidate pages, then **opens the full text of the top 5 pages** and compares them with the ticket:
+     - Is the page title close to the summary?
+     - How many of the ticket's words appear in the page?
+     - Do word pairs from the summary (e.g. "import excel") appear in the page too?
+     - Does an error message from the description (e.g. "Template version mismatch") appear in the page word for word? This scores heavily.
+4. **It decides**:
+   - Playbook set to auto-send and scoring 60%+ → posts the playbook.
+   - Otherwise, Confluence auto-send is on and a page passes the threshold → posts the links.
+   - Otherwise → it only records the result, nothing is posted.
+5. **It records every ticket** in the "ticket ใหม่ที่ระบบตรวจแล้ว" list on the คู่มือ L1 page. The list shows what each ticket matched, the score and the reasons, and has buttons to send by hand ("ส่งให้ L1") and to check again ("ตรวจใหม่").
+6. **It never sends twice**, and it does not go back to tickets it has already checked. "ตรวจใหม่" only looks, it never sends.
 
-A playbook that is not set to auto-send still shows up in the ticket window under "คู่มือ L1", with a **"ส่งให้ L1 ใน Jira"** button for an editor to send it by hand.
+> **Render free plan**: the server sleeps after 15 minutes without traffic, and the watcher pauses with it.
+> When anyone opens the app, the server wakes up and catches up on everything (up to 24 hours back). If you want comments to arrive within 5 minutes all the time:
+> - Ping the server to keep it awake: create a free job at https://cron-job.org that calls `https://jira-master.onrender.com/api/health` every 10 minutes, or
+> - Upgrade Render to Starter, or
+> - Add the Jira Automation webhook below, which makes it instant.
 
 ## Deploy
 
 ```powershell
 cd D:\Jira_Master
-# extract cts-all-in-one-v5.zip over the repo, then
+# extract the zip over the repo, then
 cd cts-backend
-npx prisma db push        # creates the playbooks and playbook_deliveries tables
 npm install
+npx prisma db push        # creates playbooks, playbook_deliveries, ticket_checks
 npm run build
 cd ..\cts-frontend
 npm install
 npm run build
 cd ..
 git add -A
-git commit -m "Playbooks: auto-send L1 manuals as internal Jira comments"
-git push
+git commit -m "Auto-assist: pull new tickets from Jira and recheck Confluence pages"
+git push origin main
 ```
 
-### New environment variables on Render (backend)
+### Environment variables on Render (backend)
 
 | Variable | Value | Notes |
 |---|---|---|
-| `JIRA_WEBHOOK_SECRET` | a long random string, e.g. from `[guid]::NewGuid()` run twice | **Required.** Without it the webhook and the sweeper are off. |
-| `FRONTEND_URL` | `https://jira-master-umber.vercel.app` | Builds the "คู่มือไม่ตรงเรื่อง? แจ้งที่นี่" link in the comment. If not set, the first value of ALLOWED_ORIGINS is used. |
-| `JIRA_PROJECT_KEY` | `CTS` | Optional. Project the sweeper checks. |
-| `PLAYBOOK_SWEEP` | `off` | Optional. Turns the sweeper off. |
+| `FRONTEND_URL` | `https://jira-master-umber.vercel.app` | Builds the feedback link at the end of each comment |
+| `PLAYBOOK_WATCH_MS` | `300000` | Optional. How often to pull tickets (default 5 minutes, minimum 1 minute) |
+| `PLAYBOOK_WATCH` | `off` | Optional. Turns pulling off |
+| `JIRA_PROJECT_KEY` | `CTS` | Optional. Project to watch |
+| `JIRA_WEBHOOK_SECRET` | random string | **Optional.** Only needed if you use the webhook below |
 
-## Jira Automation rule (needs a Jira admin / project admin)
+The watcher uses the existing `JIRA_BASE_URL`, `JIRA_EMAIL` and `JIRA_API_TOKEN`, so there is nothing new to set up on the Jira side.
+
+## (Optional) Jira Automation webhook: makes comments arrive instantly
 
 1. Open **Project settings → Automation → Create rule**
 2. Trigger: **Work item created** (older UI: "Issue created")
@@ -119,10 +134,11 @@ The token lives only in Render's environment variables. It is not stored in the 
 - backend:
   - `src/lib/playbooks.ts` (matching, comment, sending)
   - `src/routes/playbooks.ts`
-  - `src/routes/hooks.ts` (webhook + sweeper)
+  - `src/lib/watcher.ts` (pulls new tickets from Jira)
+  - `src/routes/hooks.ts` (optional webhook)
   - `src/lib/jira.ts` (fetchTicketForPlaybook, addInternalComment, recentTicketKeys)
   - `prisma/schema.prisma` (Playbook, PlaybookDelivery)
-- backend (Confluence): `src/lib/confluence.ts`; `PlaybookDelivery.pages` field in the schema
+- backend (Confluence): `src/lib/confluence.ts` (search + page-body recheck); `PlaybookDelivery.pages` and the `TicketCheck` model in the schema
 - frontend:
   - `app/playbooks/page.tsx`
   - `components/playbooks/AdfPreview.tsx`

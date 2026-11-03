@@ -526,13 +526,14 @@ export interface PlaybookDelivery {
   pages?: Array<{ id: string; title: string; url: string }> | null
 }
 export interface PlaybookMatch { playbookId: string; title: string; score: number; reasons: string[]; autoSend?: boolean; confluenceUrl?: string | null }
-export interface ConfluencePage { id: string; title: string; url: string; excerpt: string; space: string; score: number; matched: string[] }
+export interface ConfluencePage { id: string; title: string; url: string; excerpt: string; space: string; score: number; matched: string[]; reasons?: string[]; checked?: boolean }
 export interface ConfluenceSettings { autoSend: boolean; minScore: number; maxLinks: number; spaces: string[]; updatedBy?: string | null }
 export interface ConfluenceStatus { configured: boolean; site: string | null; settings: ConfluenceSettings }
 export interface ConfluenceResult { configured: boolean; pages: ConfluencePage[]; error?: string; minScore?: number; autoSend?: boolean }
 export interface PlaybookList {
   playbooks: Playbook[]; stats: PlaybookStats[]; recent: PlaybookDelivery[]; autoMinScore: number; webhookEnabled: boolean
   confluence: ConfluenceStatus & { stats: Omit<PlaybookStats, 'id' | 'lastSentAt'> }
+  watch?: WatchState
 }
 
 export async function listPlaybooks(): Promise<PlaybookList> {
@@ -571,4 +572,23 @@ export async function saveConfluenceSettings(s: Omit<ConfluenceSettings, 'update
 }
 export async function checkConfluence(): Promise<{ ok: boolean; message: string }> {
   const { data } = await api.post('/api/playbooks/confluence/check'); return data
+}
+
+// ── Ticket watcher: new tickets pulled from Jira and what was decided for each ──
+export interface CheckCandidate { kind: 'playbook' | 'confluence'; id: string; title: string; url: string | null; score: number; reasons: string[]; autoSend?: boolean }
+export type CheckDecision = 'sent_playbook' | 'sent_confluence' | 'suggested' | 'low_confidence' | 'no_match' | 'already_sent' | 'error'
+export interface TicketCheck {
+  ticketKey: string; summary: string; decision: CheckDecision; decisionText: string; detail: string | null
+  candidates: CheckCandidate[] | null; trigger: 'watch' | 'webhook' | 'manual'; ticketCreatedAt: string | null; checkedAt: string
+  sent: Array<{ id: string; playbookId: string; title: string; mode: string; feedback: string | null; pages?: Array<{ id: string }> | null }>
+}
+export interface WatchState { enabled: boolean; intervalMs: number; lastRunAt: string | null; lastError: string | null; lastFound: number; lastChecked: number; running: boolean }
+export async function listChecks(): Promise<{ watch: WatchState; webhookEnabled: boolean; checks: TicketCheck[]; setupNeeded?: string }> {
+  const { data } = await api.get('/api/playbooks/checks'); return data
+}
+export async function runChecks(): Promise<{ watch: WatchState }> {
+  const { data } = await api.post('/api/playbooks/checks/run'); return data
+}
+export async function recheckTicket(key: string): Promise<{ decision: CheckDecision; decisionText: string; detail: string }> {
+  const { data } = await api.post(`/api/playbooks/checks/${encodeURIComponent(key)}/recheck`); return data
 }

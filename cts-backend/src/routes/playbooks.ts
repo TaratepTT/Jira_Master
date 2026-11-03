@@ -3,8 +3,12 @@ import prisma from '../lib/prisma.js'
 import { recordAudit } from '../lib/audit.js'
 import type { AuthedRequest } from '../middleware/requireAuth.js'
 import { fetchTicketForPlaybook } from '../lib/jira.js'
-import { AUTO_MIN_SCORE, composeComment, composeConfluenceComment, isConfluenceDelivery, loadPlaybooks, matchPlaybooks, sendConfluencePages, sendPlaybook, type PlaybookRow } from '../lib/playbooks.js'
-import { confluenceConfigured, confluenceSite, readConfluenceSettings, searchConfluence, testConfluenceConnection, type ConfluencePage } from '../lib/confluence.js'
+import {
+  AUTO_MIN_SCORE, composeComment, composeConfluenceComment, decisionText, isConfluenceDelivery, loadPlaybooks, matchPlaybooks,
+  processTicket, sendConfluencePages, sendPlaybook, type PlaybookRow,
+} from '../lib/playbooks.js'
+import { confluenceCandidates, confluenceConfigured, confluenceSite, readConfluenceSettings, testConfluenceConnection, type ConfluencePage } from '../lib/confluence.js'
+import { runWatchOnce, watchState } from '../lib/watcher.js'
 import { findSimilar, knownTickets } from '../lib/similar.js'
 
 // คู่มือ L1 (playbooks). Mounted behind requireAuth + withUserJira at /api/playbooks.
@@ -21,6 +25,9 @@ import { findSimilar, knownTickets } from '../lib/similar.js'
 //   PUT    /confluence/settings    { autoSend, minScore, maxLinks, spaces }   (admin)
 //   POST   /confluence/check       try the Confluence credentials             (admin)
 //   POST   /ticket/:key/confluence { pageId } -> internal comment with that page (editor/admin)
+//   GET    /checks                 new tickets the watcher looked at + watcher status
+//   POST   /checks/run             pull new tickets from Jira now (editor/admin)
+//   POST   /checks/:key/recheck    look at one ticket again, without sending (editor/admin)
 const router = Router()
 
 const canEdit = (req: AuthedRequest) => req.user?.role === 'editor' || req.user?.role === 'admin'
@@ -41,7 +48,7 @@ async function confluenceFor(summary: string, description: string): Promise<{ co
   const cs = await readConfluenceSettings()
   if (!confluenceConfigured()) return { configured: false, pages: [], minScore: cs.minScore, autoSend: cs.autoSend }
   try {
-    return { configured: true, pages: await searchConfluence(summary, description, cs.spaces), minScore: cs.minScore, autoSend: cs.autoSend }
+    return { configured: true, pages: await confluenceCandidates(summary, description, cs.spaces), minScore: cs.minScore, autoSend: cs.autoSend }
   } catch (err) {
     const st = (err as { response?: { status?: number } })?.response?.status
     return { configured: true, pages: [], error: `ค้น Confluence ไม่สำเร็จ${st ? ` (HTTP ${st})` : ''}`, minScore: cs.minScore, autoSend: cs.autoSend }
@@ -113,7 +120,7 @@ router.get('/', async (_req: AuthedRequest, res: Response, next: NextFunction) =
       escalation: latest.get(d.ticketKey)?.escalation ?? null,
     }))
     res.json({
-      playbooks: books, stats, recent, autoMinScore: AUTO_MIN_SCORE, webhookEnabled: !!process.env.JIRA_WEBHOOK_SECRET,
+      playbooks: books, stats, recent, autoMinScore: AUTO_MIN_SCORE, webhookEnabled: !!process.env.JIRA_WEBHOOK_SECRET, watch: watchState(),
       confluence: { configured: confluenceConfigured(), site: confluenceSite() || null, settings: cs, stats: confluenceStats },
     })
   } catch (err) {
@@ -229,6 +236,44 @@ router.patch('/deliveries/:id', async (req: AuthedRequest, res: Response, next: 
   } catch (err) { next(err) }
 })
 
+router.get('/checks', async (_req: AuthedRequest, res: Response, next: NextFunction) => {
+  try {
+    const checks = await prisma.ticketCheck.findMany({ orderBy: { checkedAt: 'desc' }, take: 60 })
+    const keys = checks.map(c => c.ticketKey)
+    const sent = keys.length ? await prisma.playbookDelivery.findMany({ where: { ticketKey: { in: keys } } }) : []
+    const books = await loadPlaybooks()
+    res.json({
+      watch: watchState(),
+      webhookEnabled: !!process.env.JIRA_WEBHOOK_SECRET,
+      checks: checks.map(c => ({
+        ...c, decisionText: decisionText(c.decision),
+        sent: sent.filter(d => d.ticketKey === c.ticketKey).map(d => ({ id: d.id, playbookId: d.playbookId, title: deliveryTitle(d, books), mode: d.mode, feedback: d.feedback, pages: d.pages })),
+      })),
+    })
+  } catch (err) {
+    const m = errMsg(err); if (m) { res.json({ watch: watchState(), webhookEnabled: !!process.env.JIRA_WEBHOOK_SECRET, checks: [], setupNeeded: m }); return }
+    next(err)
+  }
+})
+
+router.post('/checks/run', async (req: AuthedRequest, res: Response, next: NextFunction) => {
+  try {
+    if (!canEdit(req)) { res.status(403).json({ message: 'ไม่มีสิทธิ์' }); return }
+    if (!watchState().enabled) { res.status(400).json({ message: 'ตัวดึง ticket ปิดอยู่ (PLAYBOOK_WATCH=off หรือยังไม่ได้ตั้ง JIRA_API_TOKEN)' }); return }
+    res.json({ watch: await runWatchOnce() })
+  } catch (err) { next(err) }
+})
+
+router.post('/checks/:key/recheck', async (req: AuthedRequest, res: Response, next: NextFunction) => {
+  try {
+    if (!canEdit(req)) { res.status(403).json({ message: 'ไม่มีสิทธิ์' }); return }
+    const key = String(req.params.key).toUpperCase()
+    if (!KEY_RE.test(key)) { res.status(400).json({ message: 'ticket key ไม่ถูกต้อง' }); return }
+    const r = await processTicket(key, 'manual', 'check')
+    res.json({ ...r, decisionText: decisionText(r.decision) })
+  } catch (err) { next(err) }
+})
+
 router.get('/confluence/settings', async (_req: AuthedRequest, res: Response, next: NextFunction) => {
   try { res.json({ configured: confluenceConfigured(), site: confluenceSite() || null, settings: await readConfluenceSettings() }) } catch (err) { next(err) }
 })
@@ -275,7 +320,7 @@ router.post('/ticket/:key/confluence', async (req: AuthedRequest, res: Response,
     const ticket = await fetchTicketForPlaybook(key)
     if (!ticket) { res.status(404).json({ message: `ไม่พบ ${key} ใน Jira` }); return }
     // only pages the search actually returned for this ticket can be sent (no arbitrary links)
-    const page = (await searchConfluence(ticket.summary, ticket.description)).find(x => x.id === pageId)
+    const page = (await confluenceCandidates(ticket.summary, ticket.description)).find(x => x.id === pageId)
     if (!page) { res.status(404).json({ message: 'ไม่พบหน้านี้ในผลค้นของ ticket นี้' }); return }
     const r = await sendConfluencePages(ticket, [page], 'manual', req.user)
     if (!r.ok) { res.status(r.reason === 'already_sent' ? 409 : 502).json({ message: r.message }); return }

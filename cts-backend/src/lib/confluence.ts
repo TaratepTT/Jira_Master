@@ -12,7 +12,7 @@ import { normalizeText, similarity, textGrams } from './similar.js'
 // ══════════════════════════════════════════════════════════════
 
 export interface ConfluenceSettings { autoSend: boolean; minScore: number; maxLinks: number; spaces: string[] }
-export interface ConfluencePage { id: string; title: string; url: string; excerpt: string; space: string; score: number; matched: string[] }
+export interface ConfluencePage { id: string; title: string; url: string; excerpt: string; space: string; score: number; matched: string[]; reasons?: string[]; checked?: boolean }
 
 const baseUrl = () => (process.env.CONFLUENCE_BASE_URL ?? '').trim().replace(/\/+$/, '').replace(/\/wiki$/, '')
 export const confluenceConfigured = () => !!(baseUrl() && process.env.CONFLUENCE_EMAIL && process.env.CONFLUENCE_API_TOKEN)
@@ -147,4 +147,94 @@ export async function testConfluenceConnection(): Promise<{ ok: boolean; message
     const st = (err as { response?: { status?: number } })?.response?.status
     return { ok: false, message: st === 401 ? 'อีเมลหรือ API token ของ Confluence ไม่ถูกต้อง' : st === 403 ? 'บัญชีนี้ไม่มีสิทธิ์อ่าน Confluence' : `เชื่อม Confluence ไม่ได้${st ? ` (HTTP ${st})` : ''}` }
   }
+}
+
+// ══════════════════════════════════════════════════════════════
+// Recheck: open each candidate page and compare its full text with the whole ticket
+// ══════════════════════════════════════════════════════════════
+
+const bodyCache = new Map<string, { at: number; text: string }>()
+
+function htmlToText(html: string): string {
+  return html
+    .replace(/<ac:structured-macro[^>]*ac:name="(?:toc|children|recently-updated)"[\s\S]*?<\/ac:structured-macro>/g, ' ')
+    .replace(/<(br|\/p|\/li|\/h\d|\/tr|\/div)[^>]*>/gi, '\n')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'")
+    .replace(/[ \t]+/g, ' ')
+    .replace(/\n\s*\n+/g, '\n')
+    .trim()
+}
+
+export async function pageText(id: string): Promise<string> {
+  const hit = bodyCache.get(id)
+  if (hit && Date.now() - hit.at < 30 * 60_000) return hit.text
+  const { data } = await cf().get(`/content/${encodeURIComponent(id)}`, { params: { expand: 'body.storage' } })
+  const html = (data as { body?: { storage?: { value?: string } } }).body?.storage?.value ?? ''
+  const text = htmlToText(html).slice(0, 30000)
+  bodyCache.set(id, { at: Date.now(), text })
+  if (bodyCache.size > 300) bodyCache.delete(bodyCache.keys().next().value as string)
+  return text
+}
+
+/** Phrases worth matching word for word: quoted text and English error messages in the ticket */
+export function errorPhrases(text: string): string[] {
+  const out = new Set<string>()
+  for (const m of text.matchAll(/["“'‘]([^"”'’\n]{8,120})["”'’]/g)) out.add(m[1])
+  for (const line of text.split(/\n|(?<=[.!?])\s/)) {
+    if (/(error|exception|failed|failure|invalid|not found|denied|timeout|unable|cannot|can't)/i.test(line)) {
+      const en = line.match(/[A-Za-z][A-Za-z0-9 _.,:'()/-]{10,}/g) ?? []
+      en.forEach(x => out.add(x))
+    }
+  }
+  return [...out].map(x => normalizeText(x)).filter(x => x.length >= 10 && x.split(' ').length >= 2).slice(0, 8)
+}
+
+/** Full score for one page against the ticket (0..1) with reasons people can read */
+export function scorePageBody(summary: string, description: string, title: string, body: string): { score: number; reasons: string[]; matched: string[] } {
+  const terms = searchTerms(summary, description)
+  const sTerms = searchTerms(summary)
+  const normBody = normalizeText(`${title} ${body}`)
+  const flatBody = normBody.replace(/ /g, '')
+  const flatTitle = normalizeText(title).replace(/ /g, '')
+  const has = (hay: string, t: string) => hay.includes(t.replace(/ /g, ''))
+  const matched = terms.filter(t => has(flatBody, t))
+  const inTitle = sTerms.filter(t => has(flatTitle, t))
+  const titleSim = similarity(textGrams(summary), textGrams(title))
+  const titleCov = sTerms.length ? inTitle.length / sTerms.length : 0
+  const bodyCov = terms.length ? matched.length / terms.length : 0
+  // word pairs from the summary that also sit next to each other in the page ("import excel", "excel trip")
+  const pairs: string[] = []
+  for (let i = 0; i + 1 < sTerms.length; i++) pairs.push(`${sTerms[i]} ${sTerms[i + 1]}`)
+  const pairHits = pairs.filter(pr => normBody.includes(pr))
+  const pairCov = pairs.length ? pairHits.length / pairs.length : 0
+  const errs = errorPhrases(description).filter(e => normBody.includes(e))
+  const reasons: string[] = []
+  if (inTitle.length) reasons.push(`ชื่อหน้ามีคำ: ${inTitle.join(', ')}`)
+  if (matched.length) reasons.push(`เนื้อหามีคำ ${matched.length}/${terms.length}`)
+  if (pairHits.length) reasons.push(`มีวลีเดียวกัน: ${pairHits.slice(0, 3).join(', ')}`)
+  if (errs.length) reasons.push('พบข้อความ error เดียวกันในหน้า')
+  const score = Math.min(1, 0.25 * titleSim + 0.25 * titleCov + 0.3 * bodyCov + 0.2 * pairCov + (errs.length ? 0.25 : 0))
+  return { score, reasons, matched }
+}
+
+/**
+ * Stage 1: Confluence search finds up to 10 candidates.
+ * Stage 2: the best 5 are opened and scored on their full text. Pages that could not be
+ * opened keep their search score (marked checked=false) at 80% so they rarely win.
+ */
+export async function confluenceCandidates(summary: string, description = '', spaces?: string[], limit = 5): Promise<ConfluencePage[]> {
+  const found = await searchConfluence(summary, description, spaces, 10)
+  const top = found.slice(0, 5)
+  const checked = await Promise.all(top.map(async pg => {
+    try {
+      const body = await pageText(pg.id)
+      const r = scorePageBody(summary, description, pg.title, body)
+      const excerpt = pg.excerpt || body.slice(0, 200)
+      return { ...pg, excerpt, score: r.score, matched: r.matched, reasons: r.reasons, checked: true }
+    } catch {
+      return { ...pg, score: pg.score * 0.8, reasons: ['ผลจากการค้นเท่านั้น เปิดเนื้อหาหน้าไม่ได้'], checked: false }
+    }
+  }))
+  return checked.sort((a, b) => b.score - a.score).slice(0, limit)
 }
