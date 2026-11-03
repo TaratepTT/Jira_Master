@@ -526,10 +526,10 @@ export interface PlaybookDelivery {
   pages?: Array<{ id: string; title: string; url: string }> | null
 }
 export interface PlaybookMatch { playbookId: string; title: string; score: number; reasons: string[]; autoSend?: boolean; confluenceUrl?: string | null }
-export interface ConfluencePage { id: string; title: string; url: string; excerpt: string; space: string; score: number; matched: string[]; reasons?: string[]; checked?: boolean }
+export interface ConfluencePage { id: string; title: string; url: string; excerpt: string; space: string; score: number; matched: string[]; reasons?: string[]; checked?: boolean; steps?: string[] }
 export interface ConfluenceRoot { id: string; title: string; url: string }
-export interface ConfluenceSettings { autoSend: boolean; minScore: number; maxLinks: number; spaces: string[]; roots: ConfluenceRoot[]; updatedBy?: string | null }
-export interface ConfluenceStatus { configured: boolean; site: string | null; settings: ConfluenceSettings }
+export interface ConfluenceSettings { autoSend: boolean; minScore: number; maxLinks: number; spaces: string[]; roots: ConfluenceRoot[]; aiAssist?: boolean; updatedBy?: string | null }
+export interface ConfluenceStatus { configured: boolean; site: string | null; aiAvailable?: boolean; settings: ConfluenceSettings }
 export interface ConfluenceResult { configured: boolean; pages: ConfluencePage[]; error?: string; minScore?: number; autoSend?: boolean }
 export interface PlaybookList {
   playbooks: Playbook[]; stats: PlaybookStats[]; recent: PlaybookDelivery[]; autoMinScore: number; webhookEnabled: boolean
@@ -552,7 +552,8 @@ export async function deletePlaybook(id: string): Promise<void> {
 export async function testPlaybooks(t: { summary: string; description?: string; typeOfIssue?: string; system?: string }): Promise<PlaybookTestResult> {
   const { data } = await api.post('/api/playbooks/test', t); return data
 }
-export interface PlaybookTestResult { matches: PlaybookMatch[]; confluence: ConfluenceResult; preview: unknown; wouldAutoSend: boolean; wouldSend: 'playbook' | 'confluence' | null }
+export type AiVerdict = { relevant: boolean; pageId: string | null; pageTitle: string | null; steps: string[]; reason: string } | { error: string }
+export interface PlaybookTestResult { matches: PlaybookMatch[]; confluence: ConfluenceResult; preview: unknown; wouldAutoSend: boolean; wouldSend: 'playbook' | 'confluence' | null; ai?: AiVerdict | null }
 export async function getTicketPlaybooks(key: string): Promise<{ matches: PlaybookMatch[]; confluence: ConfluenceResult; sent: PlaybookDelivery[]; hasPlaybooks: boolean; setupNeeded?: string }> {
   const { data } = await api.get(`/api/playbooks/ticket/${encodeURIComponent(key)}`); return data
 }

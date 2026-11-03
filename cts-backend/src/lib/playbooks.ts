@@ -3,6 +3,7 @@ import { normalizeText, textGrams, similarity, knownTickets, findSimilar } from 
 import { addInternalComment, fetchTicketForPlaybook, type PlaybookTicket } from './jira.js'
 import { recordAudit, type AuditActor } from './audit.js'
 import { confluenceCandidates, confluenceConfigured, readConfluenceSettings, type ConfluencePage } from './confluence.js'
+import { aiAssistAvailable, aiCheckPages } from './aiAssist.js'
 
 // ══════════════════════════════════════════════════════════════
 // Playbooks (คู่มือ L1): match a ticket to a manual, post it as an internal comment
@@ -101,20 +102,32 @@ export function composeComment(b: PlaybookRow, similar: Array<{ key: string; res
 }
 
 /** Internal comment with the Confluence pages the search found */
-export function composeConfluenceComment(pages: Array<Pick<ConfluencePage, 'title' | 'url' | 'excerpt'>>, similar: Array<{ key: string; resolution: string }>, feedbackUrl: string | null): unknown {
+/**
+ * Internal comment with the Confluence pages found. The first (best) page gets its steps written out:
+ * steps the AI condensed from it when the AI check is on, otherwise the numbered steps in the page itself.
+ */
+export function composeConfluenceComment(
+  pages: Array<Pick<ConfluencePage, 'title' | 'url' | 'excerpt' | 'steps'>>,
+  similar: Array<{ key: string; resolution: string }>,
+  feedbackUrl: string | null,
+  opts: { aiSteps?: string[] } = {},
+): unknown {
   const content: unknown[] = [
     { type: 'paragraph', content: [{ type: 'text', text: pages.length > 1 ? 'คู่มือใน Confluence ที่น่าจะเกี่ยวข้อง:' : 'คู่มือใน Confluence ที่น่าจะเกี่ยวข้อง', marks: [{ type: 'strong' }] }] },
-    {
-      type: 'bulletList',
-      content: pages.map(pg => ({
-        type: 'listItem',
-        content: [
-          { type: 'paragraph', content: [{ type: 'text', text: pg.title, marks: [{ type: 'link', attrs: { href: pg.url } }] }] },
-          ...(pg.excerpt ? [p(pg.excerpt.slice(0, 180) + (pg.excerpt.length > 180 ? '…' : ''))] : []),
-        ],
-      })),
-    },
   ]
+  pages.forEach((pg, idx) => {
+    content.push({ type: 'paragraph', content: [
+      { type: 'text', text: pages.length > 1 ? `${idx + 1}. ` : '' },
+      { type: 'text', text: pg.title, marks: [{ type: 'link', attrs: { href: pg.url } }] },
+    ].filter(n => (n as { text: string }).text) })
+    const steps = idx === 0 ? (opts.aiSteps?.length ? opts.aiSteps : pg.steps ?? []) : []
+    if (steps.length) {
+      content.push(p(opts.aiSteps?.length && idx === 0 ? 'ขั้นตอน (AI สรุปจากหน้านี้ ตรวจกับคู่มือก่อนทำ):' : 'ขั้นตอนจากคู่มือ:'))
+      content.push({ type: 'orderedList', content: steps.map(st => ({ type: 'listItem', content: [p(st.replace(/^\d+[.)]\s*/, ''))] })) })
+    } else if (pg.excerpt) {
+      content.push(p(pg.excerpt.slice(0, 180) + (pg.excerpt.length > 180 ? '…' : '')))
+    }
+  })
   const withRes = similar.filter(x => x.resolution).slice(0, 3)
   if (withRes.length) {
     content.push(p('ticket คล้ายกันที่เคยแก้แล้ว:'))
@@ -134,6 +147,7 @@ export const isConfluenceDelivery = (playbookId: string) => playbookId.startsWit
 /** Post Confluence page links to a ticket. Never posts the same page twice to a ticket. */
 export async function sendConfluencePages(
   ticket: PlaybookTicket, pages: ConfluencePage[], mode: 'auto' | 'manual', actor: AuditActor | undefined,
+  opts: { aiSteps?: string[]; aiReason?: string } = {},
 ): Promise<SendResult> {
   if (!pages.length) return { ok: false, reason: 'no_match', message: 'ไม่มีหน้า Confluence ที่จะส่ง' }
   const playbookId = `confluence:${pages[0].id}`
@@ -152,7 +166,7 @@ export async function sendConfluencePages(
   let similar: Array<{ key: string; resolution: string }> = []
   try { similar = findSimilar({ key: ticket.key, summary: ticket.summary, typeOfIssue: ticket.typeOfIssue }, await knownTickets(), 3) } catch { /* bonus */ }
   try {
-    await addInternalComment(ticket.key, composeConfluenceComment(pages, similar, feedbackLink(delivery.id)))
+    await addInternalComment(ticket.key, composeConfluenceComment(pages, similar, feedbackLink(delivery.id), opts))
   } catch (err) {
     await prisma.playbookDelivery.delete({ where: { id: delivery.id } }).catch(() => undefined)
     const st = (err as { response?: { status?: number } })?.response?.status
@@ -162,7 +176,7 @@ export async function sendConfluencePages(
   await recordAudit(actor, {
     action: 'playbook.confluence', ticketKey: ticket.key,
     summary: `${mode === 'auto' ? 'ส่งลิงก์ Confluence อัตโนมัติ' : 'ส่งลิงก์ Confluence'} "${title}" ให้ ${ticket.key}`,
-    details: { pages: pages.map(x => ({ id: x.id, title: x.title, score: Math.round(x.score * 100) / 100 })), mode },
+    details: { pages: pages.map(x => ({ id: x.id, title: x.title, score: Math.round(x.score * 100) / 100 })), mode, ai: !!opts.aiSteps?.length, aiReason: opts.aiReason ?? null },
   })
   return { ok: true, deliveryId: delivery.id, playbookId, title }
 }
@@ -289,8 +303,25 @@ export async function processTicket(key: string, trigger: 'watch' | 'webhook' | 
         return await record({ key, decision: send.ok ? 'sent_playbook' : 'error', detail: send.ok ? `ส่ง "${best!.playbook.title}"` : send.message, candidates, send }, ticket)
       }
       if (cs.autoSend && goodPages.length) {
-        const send = await sendConfluencePages(ticket, goodPages, 'auto', undefined)
-        return await record({ key, decision: send.ok ? 'sent_confluence' : 'error', detail: send.ok ? `ส่ง ${goodPages.map(x => `"${x.title}"`).join(', ')}` : send.message, candidates, send }, ticket)
+        // optional AI check: confirm which page really fits and condense its steps
+        let toSend = goodPages
+        let aiSteps: string[] | undefined, aiReason: string | undefined, aiNote = ''
+        if (cs.aiAssist && aiAssistAvailable()) {
+          const ai = await aiCheckPages(ticket, goodPages)
+          if (ai.ok && !ai.verdict.relevant) {
+            const c2 = candidates.map(c => (c.kind === 'confluence' ? { ...c, reasons: [...c.reasons, `AI: ${ai.verdict.reason || 'ไม่ตรงกับปัญหา'}`] } : c))
+            return await record({ key, decision: 'low_confidence', detail: `AI ตรวจแล้วว่าหน้าที่เจอไม่ตรงกับปัญหา: ${ai.verdict.reason}`, candidates: c2 }, ticket)
+          }
+          if (ai.ok) {
+            const pick = goodPages.find(x => x.id === ai.verdict.pageId)!
+            toSend = [pick, ...goodPages.filter(x => x.id !== pick.id)].slice(0, cs.maxLinks)
+            aiSteps = ai.verdict.steps; aiReason = ai.verdict.reason; aiNote = ' (AI ยืนยันแล้ว)'
+          } else {
+            aiNote = ` (AI ใช้ไม่ได้: ${ai.error} ใช้ผลจากระบบแทน)`
+          }
+        }
+        const send = await sendConfluencePages(ticket, toSend, 'auto', undefined, { aiSteps, aiReason })
+        return await record({ key, decision: send.ok ? 'sent_confluence' : 'error', detail: send.ok ? `ส่ง ${toSend.map(x => `"${x.title}"`).join(', ')}${aiNote}` : send.message, candidates, send }, ticket)
       }
     }
     if (sentBefore) return await record({ key, decision: 'already_sent', detail: 'ticket นี้ได้คู่มือไปแล้ว', candidates }, ticket)

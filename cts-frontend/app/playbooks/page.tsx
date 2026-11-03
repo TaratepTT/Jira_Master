@@ -147,6 +147,7 @@ function ConfluenceList({ pages, minScore }: { pages: ConfluencePage[]; minScore
 function ConfluencePanel({ status, stats, isAdmin, onSaved }: { status: ConfluenceStatus; stats: PlaybookList['confluence']['stats']; isAdmin: boolean; onSaved: () => void }) {
   const st = status.settings
   const [auto, setAuto] = useState(st.autoSend)
+  const [aiOn, setAiOn] = useState(!!st.aiAssist)
   const [min, setMin] = useState(String(Math.round(st.minScore * 100)))
   const [links, setLinks] = useState(String(st.maxLinks))
   const [spaces, setSpaces] = useState(st.spaces.join(', '))
@@ -154,12 +155,12 @@ function ConfluencePanel({ status, stats, isAdmin, onSaved }: { status: Confluen
   const [roots, setRoots] = useState(rootsText)
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null)
   const [busy, setBusy] = useState<'' | 'save' | 'check'>('')
-  useEffect(() => { setAuto(st.autoSend); setMin(String(Math.round(st.minScore * 100))); setLinks(String(st.maxLinks)); setSpaces(st.spaces.join(', ')); setRoots(rootsText) }, [st.autoSend, st.minScore, st.maxLinks, st.spaces, rootsText])
+  useEffect(() => { setAiOn(!!st.aiAssist); setAuto(st.autoSend); setMin(String(Math.round(st.minScore * 100))); setLinks(String(st.maxLinks)); setSpaces(st.spaces.join(', ')); setRoots(rootsText) }, [st.autoSend, st.aiAssist, st.minScore, st.maxLinks, st.spaces, rootsText])
 
   const save = async () => {
     setBusy('save'); setMsg(null)
     try {
-      await saveConfluenceSettings({ autoSend: auto, minScore: Number(min) / 100, maxLinks: Number(links), spaces: spaces.split(',').map(x => x.trim()).filter(Boolean), roots: roots.split('\n').map(x => x.trim()).filter(Boolean) })
+      await saveConfluenceSettings({ autoSend: auto, aiAssist: aiOn, minScore: Number(min) / 100, maxLinks: Number(links), spaces: spaces.split(',').map(x => x.trim()).filter(Boolean), roots: roots.split('\n').map(x => x.trim()).filter(Boolean) })
       setMsg({ ok: true, text: 'บันทึกแล้ว' }); onSaved()
     } catch (e) { setMsg({ ok: false, text: errMsg(e, 'บันทึกไม่สำเร็จ') }) } finally { setBusy('') }
   }
@@ -216,6 +217,20 @@ function ConfluencePanel({ status, stats, isAdmin, onSaved }: { status: Confluen
               <label className="mt-3 block text-[12px] text-muted">ค้นเฉพาะหน้าที่อยู่ใต้หน้านี้ (รวมหน้าลูกทุกชั้น) ใส่ชื่อหน้าหรือลิงก์ บรรทัดละหน้า เว้นว่าง = ทุกหน้าใน space
                 <textarea value={roots} onChange={e => setRoots(e.target.value)} rows={2} className="field mt-1 resize-y" placeholder="Tech Knowledge and Solution" aria-label="หน้าหลักที่ให้ค้น" />
               </label>
+              <div className="mt-3 rounded-md border border-line bg-surface p-2.5">
+                {status.aiAvailable ? (
+                  <label className="flex items-start gap-2 text-[13px]">
+                    <input type="checkbox" checked={aiOn} onChange={e => setAiOn(e.target.checked)} className="mt-0.5 accent-[var(--accent)]" />
+                    <span>ให้ AI (Claude) ตรวจซ้ำก่อนส่ง
+                      <span className="block text-[12px] text-muted">AI อ่านเฉพาะหน้าที่ผ่านเกณฑ์ บอกว่าหน้าไหนแก้ปัญหานี้ได้จริง แล้วสรุปขั้นตอนให้ ถ้า AI บอกว่าไม่ตรงจะไม่ส่ง ค่าใช้จ่ายประมาณ $0.001 ต่อ ticket</span>
+                    </span>
+                  </label>
+                ) : (
+                  <p className="text-[12px] text-muted">
+                    ตอนนี้ใช้ขั้นตอนที่เขียนไว้ในหน้า Confluence (ฟรี) ถ้าอยากให้ AI ตรวจซ้ำและสรุปขั้นตอน ให้ตั้ง <span className="key">ANTHROPIC_API_KEY</span> บน Render
+                  </p>
+                )}
+              </div>
               <div className="mt-3 flex flex-wrap items-center gap-2">
                 <button onClick={save} disabled={!!busy} aria-busy={busy === 'save'} className="btn-primary">บันทึกการตั้งค่า</button>
                 <button onClick={check} disabled={!!busy} aria-busy={busy === 'check'} className="btn">ทดสอบการเชื่อมต่อ</button>
@@ -282,6 +297,13 @@ function Tester({ minScore }: { minScore: number }) {
                   {r.confluence.error ? <p className="text-[13px] text-danger">{r.confluence.error}</p>
                     : r.confluence.pages.length === 0 ? <p className="text-[13px] text-muted">ไม่พบหน้าที่เกี่ยวข้อง</p>
                     : <ConfluenceList pages={r.confluence.pages} minScore={r.confluence.minScore ?? 0.5} />}
+                </div>
+              )}
+              {r.ai && (
+                <div data-testid="tester-ai" className="rounded-md border border-line p-2.5 text-[13px]">
+                  {'error' in r.ai ? <p className="text-attention">AI ตรวจไม่ได้: {r.ai.error} (จะใช้ผลจากระบบแทน)</p>
+                    : r.ai.relevant ? <p className="text-ok">AI ยืนยัน: {r.ai.pageTitle} <span className="text-muted">({r.ai.reason})</span></p>
+                    : <p className="text-attention">AI บอกว่าไม่มีหน้าที่ตรง จึงไม่ส่ง <span className="text-muted">({r.ai.reason})</span></p>}
                 </div>
               )}
             </div>

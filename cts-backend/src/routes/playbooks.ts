@@ -9,6 +9,7 @@ import {
 } from '../lib/playbooks.js'
 import { confluenceCandidates, confluenceConfigured, confluenceSite, readConfluenceSettings, resolveRootPage, testConfluenceConnection, type ConfluencePage, type RootPage } from '../lib/confluence.js'
 import { runWatchOnce, watchState } from '../lib/watcher.js'
+import { aiAssistAvailable, aiCheckPages } from '../lib/aiAssist.js'
 import { findSimilar, knownTickets } from '../lib/similar.js'
 
 // คู่มือ L1 (playbooks). Mounted behind requireAuth + withUserJira at /api/playbooks.
@@ -44,6 +45,8 @@ function deliveryTitle(d: DeliveryRow, books: PlaybookRow[]): string {
 }
 
 /** Confluence results for a ticket; never throws (search errors become a message) */
+const publicPage = (p: ConfluencePage): ConfluencePage => { const { text: _t, ...rest } = p; void _t; return rest }
+
 async function confluenceFor(summary: string, description: string): Promise<{ configured: boolean; pages: ConfluencePage[]; error?: string; minScore: number; autoSend: boolean }> {
   const cs = await readConfluenceSettings()
   if (!confluenceConfigured()) return { configured: false, pages: [], minScore: cs.minScore, autoSend: cs.autoSend }
@@ -121,7 +124,7 @@ router.get('/', async (_req: AuthedRequest, res: Response, next: NextFunction) =
     }))
     res.json({
       playbooks: books, stats, recent, autoMinScore: AUTO_MIN_SCORE, webhookEnabled: !!process.env.JIRA_WEBHOOK_SECRET, watch: watchState(),
-      confluence: { configured: confluenceConfigured(), site: confluenceSite() || null, settings: cs, stats: confluenceStats },
+      confluence: { configured: confluenceConfigured(), site: confluenceSite() || null, aiAvailable: aiAssistAvailable(), settings: cs, stats: confluenceStats },
     })
   } catch (err) {
     const m = errMsg(err); if (m) { res.status(503).json({ message: m }); return }
@@ -156,16 +159,26 @@ router.post('/test', async (req: AuthedRequest, res: Response, next: NextFunctio
     const cs = await readConfluenceSettings()
     const cfAuto = cf.pages.filter(x => x.score >= cf.minScore).slice(0, cs.maxLinks)
     // what the automatic run would do: playbook first, then Confluence
-    const wouldSend = autoBook ? 'playbook' : cf.autoSend && cfAuto.length ? 'confluence' : null
+    // the AI check, exactly as the automatic run would do it (only when it is switched on)
+    let ai: { relevant: boolean; pageId: string | null; pageTitle: string | null; steps: string[]; reason: string } | { error: string } | null = null
+    if (!autoBook && cfAuto.length && cs.aiAssist && aiAssistAvailable()) {
+      const r = await aiCheckPages(t, cfAuto)
+      ai = r.ok ? { ...r.verdict, pageTitle: cfAuto.find(x => x.id === r.verdict.pageId)?.title ?? null } : { error: r.error }
+    }
+    const aiSaysNo = !!ai && 'relevant' in ai && !ai.relevant
+    const aiPicked = ai && 'relevant' in ai && ai.relevant ? cfAuto.find(x => x.id === ai.pageId) : undefined
+    const cfToSend = aiPicked ? [aiPicked, ...cfAuto.filter(x => x.id !== aiPicked.id)].slice(0, cs.maxLinks) : cfAuto
+    const wouldSend = autoBook ? 'playbook' : cf.autoSend && cfAuto.length && !aiSaysNo ? 'confluence' : null
     res.json({
       matches: matches.slice(0, 5).map(m => ({ playbookId: m.playbook.id, title: m.playbook.title, score: m.score, reasons: m.reasons, autoSend: m.playbook.autoSend })),
-      confluence: cf,
+      confluence: { ...cf, pages: cf.pages.map(publicPage) },
       preview: autoBook ? composeComment(autoBook.playbook, similar, null)
-        : cfAuto.length ? composeConfluenceComment(cfAuto, similar, null)
+        : cfToSend.length && !aiSaysNo ? composeConfluenceComment(cfToSend, similar, null, { aiSteps: ai && 'steps' in ai ? ai.steps : undefined })
         : matches[0] ? composeComment(matches[0].playbook, similar, null)
         : cf.pages[0] ? composeConfluenceComment([cf.pages[0]], similar, null) : null,
       wouldAutoSend: !!wouldSend,
       wouldSend,
+      ai,
     })
   } catch (err) { next(err) }
 })
@@ -187,7 +200,7 @@ router.get('/ticket/:key', async (req: AuthedRequest, res: Response, next: NextF
     const cf = t ? await confluenceFor(t.summary, t.description) : { configured: confluenceConfigured(), pages: [] }
     res.json({
       matches: matches.slice(0, 3).map(m => ({ playbookId: m.playbook.id, title: m.playbook.title, score: m.score, reasons: m.reasons, confluenceUrl: m.playbook.confluenceUrl })),
-      confluence: { ...cf, pages: cf.pages.slice(0, 3) },
+      confluence: { ...cf, pages: cf.pages.slice(0, 3).map(publicPage) },
       sent: sent.map(d => ({ ...d, title: deliveryTitle(d, books) })),
       hasPlaybooks: books.some(b => b.enabled) || cf.configured,
     })
@@ -275,7 +288,7 @@ router.post('/checks/:key/recheck', async (req: AuthedRequest, res: Response, ne
 })
 
 router.get('/confluence/settings', async (_req: AuthedRequest, res: Response, next: NextFunction) => {
-  try { res.json({ configured: confluenceConfigured(), site: confluenceSite() || null, settings: await readConfluenceSettings() }) } catch (err) { next(err) }
+  try { res.json({ configured: confluenceConfigured(), site: confluenceSite() || null, aiAvailable: aiAssistAvailable(), settings: await readConfluenceSettings() }) } catch (err) { next(err) }
 })
 
 router.put('/confluence/settings', async (req: AuthedRequest, res: Response, next: NextFunction) => {
@@ -304,7 +317,8 @@ router.put('/confluence/settings', async (req: AuthedRequest, res: Response, nex
       if ('error' in r) { res.status(400).json({ message: r.error }); return }
       if (!roots.some(x => x.id === r.id)) roots.push(r)
     }
-    const value = { autoSend: b.autoSend === true, minScore: Math.round(minScore * 100) / 100, maxLinks, spaces, roots: roots.map(r => ({ id: r.id, title: r.title, url: r.url })) }
+    const aiAssist = b.aiAssist === undefined ? before0.aiAssist : b.aiAssist === true
+    const value = { autoSend: b.autoSend === true, minScore: Math.round(minScore * 100) / 100, maxLinks, spaces, roots: roots.map(r => ({ id: r.id, title: r.title, url: r.url })), aiAssist }
     const before = await readConfluenceSettings()
     await prisma.appSetting.upsert({
       where: { key: 'confluence' },
@@ -312,7 +326,7 @@ router.put('/confluence/settings', async (req: AuthedRequest, res: Response, nex
       update: { value, updatedBy: req.user.name },
     })
     await recordAudit(req.user, { action: 'settings.confluence', summary: `ตั้งค่าค้น Confluence: ${value.autoSend ? 'ส่งอัตโนมัติ' : 'ไม่ส่งอัตโนมัติ'}, เกณฑ์ ${Math.round(value.minScore * 100)}%${roots.length ? `, เฉพาะใต้ ${roots.map(r => r.title).join(', ')}` : ''}`, details: { before, after: value } })
-    res.json({ configured: confluenceConfigured(), site: confluenceSite() || null, settings: await readConfluenceSettings() })
+    res.json({ configured: confluenceConfigured(), site: confluenceSite() || null, aiAvailable: aiAssistAvailable(), settings: await readConfluenceSettings() })
   } catch (err) {
     const m = errMsg(err); if (m) { res.status(503).json({ message: m }); return }
     next(err)

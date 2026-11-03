@@ -13,15 +13,22 @@ import { normalizeText, similarity, textGrams } from './similar.js'
 
 export interface RootPage { id: string; title: string; url: string }
 /** roots: only search these pages and everything under them (empty = whole space) */
-export interface ConfluenceSettings { autoSend: boolean; minScore: number; maxLinks: number; spaces: string[]; roots: RootPage[] }
-export interface ConfluencePage { id: string; title: string; url: string; excerpt: string; space: string; score: number; matched: string[]; reasons?: string[]; checked?: boolean }
+export interface ConfluenceSettings { autoSend: boolean; minScore: number; maxLinks: number; spaces: string[]; roots: RootPage[]; aiAssist: boolean }
+export interface ConfluencePage {
+  id: string; title: string; url: string; excerpt: string; space: string; score: number; matched: string[]
+  reasons?: string[]; checked?: boolean
+  /** numbered steps found in the page ("วิธีแก้" section or the first numbered list) */
+  steps?: string[]
+  /** page text, kept only in memory for the AI check (never sent to the browser) */
+  text?: string
+}
 
 const baseUrl = () => (process.env.CONFLUENCE_BASE_URL ?? '').trim().replace(/\/+$/, '').replace(/\/wiki$/, '')
 export const confluenceConfigured = () => !!(baseUrl() && process.env.CONFLUENCE_EMAIL && process.env.CONFLUENCE_API_TOKEN)
 export const confluenceSite = () => baseUrl()
 
 const envSpaces = () => (process.env.CONFLUENCE_SPACES ?? '').split(',').map(s => s.trim()).filter(Boolean)
-export const DEFAULT_CONFLUENCE: ConfluenceSettings = { autoSend: false, minScore: 0.5, maxLinks: 2, spaces: [], roots: [] }
+export const DEFAULT_CONFLUENCE: ConfluenceSettings = { autoSend: false, minScore: 0.5, maxLinks: 2, spaces: [], roots: [], aiAssist: false }
 
 export async function readConfluenceSettings(): Promise<ConfluenceSettings & { updatedBy: string | null }> {
   try {
@@ -33,6 +40,7 @@ export async function readConfluenceSettings(): Promise<ConfluenceSettings & { u
         minScore: typeof v.minScore === 'number' ? v.minScore : DEFAULT_CONFLUENCE.minScore,
         maxLinks: typeof v.maxLinks === 'number' ? v.maxLinks : DEFAULT_CONFLUENCE.maxLinks,
         spaces: Array.isArray(v.spaces) && v.spaces.length ? v.spaces.map(String) : envSpaces(),
+        aiAssist: v.aiAssist === true,
         roots: Array.isArray(v.roots) ? v.roots.filter(r => r && typeof r.id === 'string').map(r => ({ id: String(r.id), title: String(r.title ?? ''), url: String(r.url ?? '') })) : [],
         updatedBy: row.updatedBy,
       }
@@ -159,7 +167,7 @@ export async function testConfluenceConnection(): Promise<{ ok: boolean; message
 // Recheck: open each candidate page and compare its full text with the whole ticket
 // ══════════════════════════════════════════════════════════════
 
-const bodyCache = new Map<string, { at: number; text: string }>()
+const bodyCache = new Map<string, { at: number; text: string; html: string }>()
 
 function htmlToText(html: string): string {
   return html
@@ -172,15 +180,86 @@ function htmlToText(html: string): string {
     .trim()
 }
 
-export async function pageText(id: string): Promise<string> {
+export async function pageContent(id: string): Promise<{ text: string; html: string }> {
   const hit = bodyCache.get(id)
-  if (hit && Date.now() - hit.at < 30 * 60_000) return hit.text
+  if (hit && Date.now() - hit.at < 30 * 60_000) return hit
   const { data } = await cf().get(`/content/${encodeURIComponent(id)}`, { params: { expand: 'body.storage' } })
-  const html = (data as { body?: { storage?: { value?: string } } }).body?.storage?.value ?? ''
+  const html = ((data as { body?: { storage?: { value?: string } } }).body?.storage?.value ?? '').slice(0, 200000)
   const text = htmlToText(html).slice(0, 30000)
-  bodyCache.set(id, { at: Date.now(), text })
+  bodyCache.set(id, { at: Date.now(), text, html })
   if (bodyCache.size > 300) bodyCache.delete(bodyCache.keys().next().value as string)
-  return text
+  return { text, html }
+}
+export async function pageText(id: string): Promise<string> {
+  return (await pageContent(id)).text
+}
+
+// Headings that usually start the "how to fix" part of a manual
+const FIX_HEADING = /(วิธีแก้|แนวทางแก้|การแก้ไข|วิธีการแก้|ขั้นตอน|แก้ปัญหา|วิธีดำเนินการ|solution|resolution|resolve|how to fix|fix|workaround|steps|procedure)/i
+
+const inlineText = (html: string) => htmlToText(html).replace(/\s+/g, ' ').trim()
+
+/** Top-level <li> items of the list that starts at `from` (nested lists are folded into their item) */
+function listItems(html: string, from: number): string[] {
+  const open = /<(ol|ul)\b[^>]*>/gi
+  open.lastIndex = from
+  const m = open.exec(html)
+  if (!m) return []
+  const tag = m[1].toLowerCase()
+  let depth = 0, i = m.index, itemStart = -1
+  const items: string[] = []
+  const re = /<(\/?)(ol|ul|li)\b[^>]*>/gi
+  re.lastIndex = i
+  let t: RegExpExecArray | null
+  while ((t = re.exec(html))) {
+    const close = t[1] === '/', name = t[2].toLowerCase()
+    if (name === 'ol' || name === 'ul') {
+      depth += close ? -1 : 1
+      if (depth === 0 && close && name === tag) break
+    } else if (name === 'li' && depth === 1) {
+      if (!close) itemStart = re.lastIndex
+      else if (itemStart >= 0) { items.push(html.slice(itemStart, t.index)); itemStart = -1 }
+    }
+  }
+  return items.map(inlineText).filter(Boolean)
+}
+
+const SYMPTOM_HEADING = /(อาการ|ปัญหาที่พบ|ข้อความ\s*error|error message|symptom|problem)/i
+
+/** Text of the section under the first heading that matches `re` (up to the next heading) */
+export function sectionText(html: string, re: RegExp): string {
+  const heads = [...html.matchAll(/<(h[1-6])\b[^>]*>([\s\S]*?)<\/\1>|<p\b[^>]*>\s*<strong>([\s\S]*?)<\/strong>\s*:?\s*<\/p>/gi)]
+  for (let i = 0; i < heads.length; i++) {
+    const h = heads[i]
+    if (!re.test(inlineText(h[2] ?? h[3] ?? ''))) continue
+    const start = (h.index ?? 0) + h[0].length
+    const end = i + 1 < heads.length ? heads[i + 1].index ?? html.length : html.length
+    return htmlToText(html.slice(start, end))
+  }
+  return ''
+}
+
+/**
+ * Steps written in the page, no AI: the first numbered list under a "วิธีแก้ / Solution / Steps"
+ * heading, otherwise the first numbered list in the page. At most 8 steps of 220 characters.
+ */
+export function extractSteps(html: string): string[] {
+  if (!html) return []
+  const heads = [...html.matchAll(/<(h[1-6])\b[^>]*>([\s\S]*?)<\/\1>|<p\b[^>]*>\s*<strong>([\s\S]*?)<\/strong>\s*:?\s*<\/p>/gi)]
+  let items: string[] = []
+  for (const h of heads) {
+    if (!FIX_HEADING.test(inlineText(h[2] ?? h[3] ?? ''))) continue
+    const after = (h.index ?? 0) + h[0].length
+    // only a list that belongs to this section (before the next heading)
+    const nextHead = html.slice(after).search(/<h[1-6]\b/i)
+    const listAt = html.slice(after).search(/<(ol|ul)\b/i)
+    if (listAt >= 0 && (nextHead < 0 || listAt < nextHead)) { items = listItems(html, after); if (items.length) break }
+  }
+  if (!items.length) {
+    const ol = html.search(/<ol\b/i)
+    if (ol >= 0) items = listItems(html, ol)
+  }
+  return items.slice(0, 8).map(x => (x.length > 220 ? `${x.slice(0, 217)}...` : x))
 }
 
 /** Phrases worth matching word for word: quoted text and English error messages in the ticket */
@@ -234,10 +313,21 @@ export async function confluenceCandidates(summary: string, description = '', sp
   const top = found.slice(0, 5)
   const checked = await Promise.all(top.map(async pg => {
     try {
-      const body = await pageText(pg.id)
+      const { text: body, html } = await pageContent(pg.id)
       const r = scorePageBody(summary, description, pg.title, body)
       const excerpt = pg.excerpt || body.slice(0, 200)
-      return { ...pg, excerpt, score: r.score, matched: r.matched, reasons: r.reasons, checked: true }
+      const steps = extractSteps(html)
+      // pages written with the template: words of the ticket inside "อาการ / ข้อความ error" count extra
+      let score = r.score
+      const reasons = [...r.reasons]
+      const symptom = normalizeText(sectionText(html, SYMPTOM_HEADING)).replace(/ /g, '')
+      if (symptom) {
+        const terms = searchTerms(summary, description)
+        const hits = terms.filter(t => symptom.includes(t.replace(/ /g, '')))
+        if (terms.length && hits.length / terms.length >= 0.4) { score = Math.min(1, score + 0.1); reasons.push('ตรงกับหัวข้ออาการในคู่มือ') }
+      }
+      if (steps.length) reasons.push(`มีขั้นตอน ${steps.length} ข้อ`)
+      return { ...pg, excerpt, score, matched: r.matched, reasons, checked: true, steps, text: body }
     } catch {
       return { ...pg, score: pg.score * 0.8, reasons: ['ผลจากการค้นเท่านั้น เปิดเนื้อหาหน้าไม่ได้'], checked: false }
     }

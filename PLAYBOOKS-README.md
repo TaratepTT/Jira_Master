@@ -95,6 +95,31 @@ If no playbook written in the app matches, the system searches Confluence using 
 - **In the ticket window**: the pages found are listed with a "ส่งลิงก์ให้ L1" button (for editors). Only pages the search actually returned for that ticket can be sent.
 - **Feedback and stats**: work the same as for playbooks ("Confluence: …" in the "ส่งล่าสุด" list).
 
+### Steps from the page in the comment (free)
+
+When the system opens a Confluence page, it also pulls out the numbered steps and puts them in the comment, so L1 doesn't have to click the link:
+- **Where it looks:** the first numbered list under a heading such as "วิธีแก้ / แนวทางแก้ / ขั้นตอน / Solution / Steps / Workaround". If there is no such heading, it takes the first numbered list in the page.
+- **What it keeps:** up to 8 steps. A sub-list folds into the step it belongs to.
+- **Bonus score:** a page that has an "อาการ / ข้อความ error" heading, and the ticket's words appear in that section, gets 10% extra.
+- **Template:** see CONFLUENCE-TEMPLATE.md for the page layout to use.
+
+### (Optional) AI check before sending — Claude API
+
+**How to turn it on:**
+1. Set `ANTHROPIC_API_KEY` on Render. This is the same key the "สร้างสรุปด้วย AI" feature uses.
+2. An admin ticks "ให้ AI (Claude) ตรวจซ้ำก่อนส่ง" in the Confluence box.
+
+**What it does:**
+- The AI reads only the ticket and the pages that already passed the threshold (up to 3 pages, about 6,000 characters each).
+- It answers which page really fixes this problem, and rewrites that page's steps short. It may only use what the page says.
+- If the AI says none of the pages fits → nothing is posted. The list shows the AI's reason.
+- If the AI is down or the daily quota is used up → the rule-based result and the steps from the page are used as before.
+- Before sending, ticket text goes through `redact` first (phone numbers, emails, ID numbers, links).
+
+**Cost and settings:**
+- Default model `claude-haiku-5-5`, about $0.001 per ticket. Change it with `PLAYBOOK_AI_MODEL`.
+- Daily limit 300 calls (`PLAYBOOK_AI_DAILY_LIMIT`).
+
 ### Search only under one page (e.g. "Tech Knowledge and Solution")
 
 Without a limit, the system searches every page in the space. That includes Tech Support pages, which are not manuals.
@@ -152,7 +177,7 @@ The token lives only in Render's environment variables. It is not stored in the 
   - `src/routes/hooks.ts` (optional webhook)
   - `src/lib/jira.ts` (fetchTicketForPlaybook, addInternalComment, recentTicketKeys)
   - `prisma/schema.prisma` (Playbook, PlaybookDelivery)
-- backend (Confluence): `src/lib/confluence.ts` (search + page-body recheck); `PlaybookDelivery.pages` and the `TicketCheck` model in the schema
+- backend (Confluence): `src/lib/confluence.ts` (search + page-body recheck + steps); `src/lib/aiAssist.ts` (optional AI check); `PlaybookDelivery.pages` and the `TicketCheck` model in the schema
 - frontend:
   - `app/playbooks/page.tsx`
   - `components/playbooks/AdfPreview.tsx`
