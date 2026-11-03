@@ -131,7 +131,7 @@ function ConfluenceList({ pages, minScore }: { pages: ConfluencePage[]; minScore
       {pages.map(pg => (
         <li key={pg.id} className="flex gap-3 px-3 py-2">
           <span className={`w-10 shrink-0 text-right text-[13px] num ${pg.score >= minScore ? 'text-ok' : 'text-faint'}`}>{Math.round(pg.score * 100)}%</span>
-          <span className="min-w-0">
+          <span className="min-w-0 flex-1">
             <a href={pg.url} target="_blank" rel="noreferrer" className="block text-[13px] text-accent hover:underline">{pg.title}</a>
             {pg.excerpt && <span className="block truncate text-[12px] text-muted">{pg.excerpt}</span>}
             {(pg.reasons?.length ?? 0) > 0 ? <span className="block text-[12px] text-faint">{pg.reasons!.join(' · ')}</span>
@@ -260,8 +260,8 @@ function Tester({ minScore }: { minScore: number }) {
     <div className="panel panel-pad">
       <h2 className="section-title">ลองกับ ticket สมมติ</h2>
       <p className="section-note mt-0.5">วาง summary ของ ticket แล้วดูว่าคู่มือไหนจะถูกส่ง และ comment จะหน้าตาแบบไหน</p>
-      <div className="mt-3 grid gap-4 lg:grid-cols-2">
-        <div className="space-y-2">
+      <div className="mt-3 grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+        <div className="min-w-0 space-y-2">
           <input value={summary} onChange={e => setSummary(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && summary.trim()) run() }}
             className="field" placeholder="summary เช่น รถทะเบียน 1กก-1234 GPS ไม่อัปเดต" aria-label="summary ที่จะทดสอบ" />
           <textarea value={description} onChange={e => setDescription(e.target.value)} rows={3} className="field resize-y" placeholder="รายละเอียด (ไม่ใส่ก็ได้)" aria-label="รายละเอียด" />
@@ -309,7 +309,7 @@ function Tester({ minScore }: { minScore: number }) {
             </div>
           )}
         </div>
-        <div>
+        <div className="min-w-0">
           <p className="mb-1.5 text-[12px] text-muted">ตัวอย่าง comment ภายใน (ลูกค้าไม่เห็น)</p>
           <div className="min-h-[8rem] rounded-md border border-dashed border-line-strong bg-sunken p-3">
             {r?.preview ? <AdfPreview doc={r.preview} /> : <p className="text-[13px] text-faint">ยังไม่มีตัวอย่าง</p>}

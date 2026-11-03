@@ -97,7 +97,10 @@ export function searchTerms(summary: string, description = ''): string[] {
 }
 
 const cqlQuote = (s: string) => `"${s.replace(/[\\"]/g, ' ').replace(/[+\-&|!(){}[\]^~*?:/]/g, ' ').trim()}"`
-const cleanExcerpt = (s: string) => s.replace(/@@@(end)?hl@@@/g, '').replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim()
+const decodeEntities = (s: string) => s
+  .replace(/&nbsp;/g, ' ').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;|&apos;/g, "'")
+  .replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(Number(n))).replace(/&amp;/g, '&')
+const cleanExcerpt = (s: string) => decodeEntities(s.replace(/@@@(end)?hl@@@/g, '').replace(/<[^>]+>/g, '')).replace(/\s+/g, ' ').trim()
 
 /** Rank by how much the page title looks like the summary and how many search words the page has */
 export function rankPage(summary: string, terms: string[], title: string, excerpt: string): { score: number; matched: string[] } {

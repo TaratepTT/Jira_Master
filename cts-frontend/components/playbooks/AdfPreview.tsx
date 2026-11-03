@@ -26,5 +26,6 @@ function render(n: Node, i: number): ReactNode {
 }
 
 export default function AdfPreview({ doc }: { doc: unknown }) {
-  return <>{render(doc as Node, 0)}</>
+  // long URLs / error codes have no spaces: let them wrap anywhere so the preview never leaves its box
+  return <div className="min-w-0 break-words [overflow-wrap:anywhere]">{render(doc as Node, 0)}</div>
 }
