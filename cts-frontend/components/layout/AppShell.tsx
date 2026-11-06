@@ -25,6 +25,7 @@ const ICON: Record<string, string> = {
   menu: 'M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5',
   close: 'M6 18L18 6M6 6l12 12',
   back: 'M15.75 19.5L8.25 12l7.5-7.5',
+  pulse: 'M3.75 12h3l2.25-6 4.5 12 2.25-6h4.5',
 }
 export function Icon({ name, className = 'h-4 w-4' }: { name: keyof typeof ICON | string; className?: string }) {
   return (
@@ -90,6 +91,7 @@ export function AppNav() {
     { label: 'ผู้ดูแลระบบ', items: [
       { href: '/admin/users', label: 'ผู้ใช้', icon: 'users', match: p => p.startsWith('/admin/users'), show: isAdmin },
       { href: '/admin/audit', label: 'ประวัติการใช้งาน', icon: 'audit', match: p => p.startsWith('/admin/audit'), show: isAdmin },
+      { href: '/admin/system', label: 'สถานะระบบ', icon: 'pulse', match: p => p.startsWith('/admin/system'), show: isAdmin },
     ] },
   ]
 

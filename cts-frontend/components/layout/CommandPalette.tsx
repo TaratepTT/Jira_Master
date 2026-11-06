@@ -78,6 +78,8 @@ export default function CommandPalette({ open, onClose }: { open: boolean; onClo
       ...(isAdmin ? [
         { kind: 'page' as const, id: 'p-users', title: 'ผู้ใช้', sub: 'อนุมัติและกำหนดสิทธิ์', run: () => go('/admin/users') },
         { kind: 'page' as const, id: 'p-audit', title: 'ประวัติการใช้งาน', sub: 'audit log', run: () => go('/admin/audit') },
+        { kind: 'page' as const, id: 'p-system', title: 'สถานะระบบ', sub: 'สำรองข้อมูล ถังขยะ กู้คืน report', run: () => go('/admin/system') },
+        { kind: 'page' as const, id: 'p-trash', title: 'ถังขยะ', sub: 'กู้คืน report ที่ลบ', run: () => go('/admin/system?tab=trash') },
       ] : []),
       { kind: 'page', id: 'p-theme', title: 'สลับโหมดสว่าง / มืด', sub: 'คำสั่ง', run: () => { toggleTheme(); onClose() } },
     ]

@@ -1,6 +1,7 @@
 import prisma from './prisma.js'
 import { recentTicketKeys } from './jira.js'
 import { processTicket } from './playbooks.js'
+import { alert } from './alerts.js'
 
 // ══════════════════════════════════════════════════════════════
 // Ticket watcher: every few minutes, pull new tickets from Jira (no Jira admin setup needed)
@@ -52,10 +53,12 @@ export async function runWatchOnce(): Promise<WatchState> {
       if (r.decision === 'sent_playbook' || r.decision === 'sent_confluence') console.log(`[watch] ${key}: ${r.detail}`)
     }
     mem = { lastRunAt: new Date().toISOString(), lastError: null, lastFound: keys.length, lastChecked: todo.length }
+    await alert.report('jira', true)
   } catch (err) {
     const st = (err as { response?: { status?: number } })?.response?.status
     mem = { ...mem, lastRunAt: new Date().toISOString(), lastError: `ดึง ticket จาก Jira ไม่สำเร็จ${st ? ` (HTTP ${st})` : ''}` }
     console.error('[watch] failed:', (err as Error)?.message)
+    await alert.report('jira', false, mem.lastError ?? 'ดึง ticket ไม่สำเร็จ', { immediate: st === 401 || st === 403 })
   } finally {
     running = false
     await saveState()

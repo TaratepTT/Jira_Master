@@ -35,11 +35,11 @@ export default function RecentReports() {
 
   const handleDelete = async (id: string) => {
     const target = reports.find(r => r.id === id)
-    if (!(await confirm({ title: 'ลบ report นี้?', message: 'ticket ทั้งหมดใน report นี้จะถูกลบออกจากระบบ ลบแล้วกู้คืนไม่ได้ (ข้อมูลใน Jira ไม่ถูกแตะ)', detail: target ? <><span className="font-medium">{target.name}</span><span className="text-muted"> · {target.totalTickets.toLocaleString()} ticket</span></> : undefined, confirmLabel: 'ลบ report', tone: 'danger' }))) return
+    if (!(await confirm({ title: 'ลบ report นี้?', message: 'report จะย้ายไปถังขยะ กู้คืนได้ภายใน 30 วันที่หน้าสถานะระบบ (ข้อมูลใน Jira ไม่ถูกแตะ)', detail: target ? <><span className="font-medium">{target.name}</span><span className="text-muted"> · {target.totalTickets.toLocaleString()} ticket</span></> : undefined, confirmLabel: 'ลบ report', tone: 'danger' }))) return
     setDeletingId(id)
     try {
       await deleteReport(id)
-      setReports((prev) => prev.filter((r) => r.id !== id)); toast.show({ text: target ? `ลบ report "${target.name}" แล้ว` : 'ลบ report แล้ว' })
+      setReports((prev) => prev.filter((r) => r.id !== id)); toast.show({ text: target ? `ย้าย "${target.name}" ไปถังขยะแล้ว` : 'ย้าย report ไปถังขยะแล้ว', action: { label: 'ดูถังขยะ', onClick: () => { window.location.href = '/admin/system?tab=trash' } } })
     } catch {
       await notify({ title: 'ลบ report ไม่สำเร็จ', message: 'ลองใหม่อีกครั้ง', tone: 'danger' })
     } finally {

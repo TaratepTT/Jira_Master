@@ -4,6 +4,7 @@ import { addInternalComment, fetchTicketForPlaybook, type PlaybookTicket } from 
 import { recordAudit, type AuditActor } from './audit.js'
 import { confluenceCandidates, confluenceConfigured, readConfluenceSettings, type ConfluencePage } from './confluence.js'
 import { aiAssistAvailable, aiCheckPages } from './aiAssist.js'
+import { alert } from './alerts.js'
 
 // ══════════════════════════════════════════════════════════════
 // Playbooks (คู่มือ L1): match a ticket to a manual, post it as an internal comment
@@ -259,6 +260,7 @@ export async function evaluateTicket(ticket: PlaybookTicket): Promise<{ candidat
       cfError = `ค้น Confluence ไม่สำเร็จ${st ? ` (HTTP ${st})` : ''}`
     }
   }
+  if (confluenceConfigured()) await alert.report('confluence', !cfError, cfError)
   const candidates: Candidate[] = [
     ...matches.slice(0, 3).map(m => ({ kind: 'playbook' as const, id: m.playbook.id, title: m.playbook.title, url: m.playbook.confluenceUrl, score: m.score, reasons: m.reasons, autoSend: m.playbook.autoSend })),
     ...pages.map(pg => ({ kind: 'confluence' as const, id: pg.id, title: pg.title, url: pg.url, score: pg.score, reasons: pg.reasons ?? [] })),

@@ -594,3 +594,72 @@ export async function runChecks(): Promise<{ watch: WatchState }> {
 export async function recheckTicket(key: string): Promise<{ decision: CheckDecision; decisionText: string; detail: string }> {
   const { data } = await api.post(`/api/playbooks/checks/${encodeURIComponent(key)}/recheck`); return data
 }
+
+// ── System status, backups and the report trash (admin) ──
+export interface SysCheck { ok: boolean | null; message: string; ms?: number; lastAt?: string | null; lastRunAt?: string | null; intervalMs?: number; url?: string | null }
+export interface SystemStatus {
+  version: string; uptimeSec: number; memoryMb: number
+  checks: { db: SysCheck; jira: SysCheck; confluence: SysCheck; watcher: SysCheck; ai: SysCheck; keepAwake: SysCheck; alerts: SysCheck; backup: SysCheck }
+  tokens: { jira: string | null; confluence: string | null; jiraDaysLeft: number | null; confluenceDaysLeft: number | null }
+  problems: Array<{ source: string; failures: number; lastError: string | null; since: string | null; notified: boolean }>
+  alertHistory: Array<{ at: string; source: string; text: string; ok: boolean; delivered: boolean }>
+  archive: { count: number; keepDays: number }
+}
+export interface BackupInfo { id: string; kind: 'auto' | 'manual'; createdBy: string; createdAt: string; size: number; counts: { reports: number; tickets: number; playbooks: number; deliveries: number; savedViews: number; users: number } }
+export interface BackupReport { id: string; name: string; tickets: number; createdAt: string; exists: boolean }
+export interface TrashItem { id: string; name: string; totalTickets: number; deletedBy: string; deletedAt: string; purgeAt: string }
+
+export async function getSystemStatus(fresh = false): Promise<SystemStatus> {
+  const { data } = await api.get('/api/admin/system', { params: fresh ? { fresh: 1 } : {} }); return data
+}
+export async function saveTokenExpiry(v: { jira: string | null; confluence: string | null }): Promise<SystemStatus> {
+  const { data } = await api.put('/api/admin/system/tokens', v); return data
+}
+export async function sendTestAlert(): Promise<{ ok: boolean; message: string }> {
+  const { data } = await api.post('/api/admin/system/test-alert', undefined, { validateStatus: s => s < 500 }); return data
+}
+export async function listBackups(): Promise<BackupInfo[]> {
+  const { data } = await api.get('/api/admin/system/backups'); return data
+}
+export async function createBackup(): Promise<BackupInfo> {
+  const { data } = await api.post('/api/admin/system/backups'); return data
+}
+/** Fetch the .json.gz with the login token and hand it to the browser as a download */
+export async function downloadBackup(b: BackupInfo): Promise<void> {
+  const res = await api.get(`/api/admin/system/backups/${encodeURIComponent(b.id)}/download`, { responseType: 'blob' })
+  const url = URL.createObjectURL(res.data as Blob)
+  const a = document.createElement('a')
+  a.href = url; a.download = `cts-backup-${b.createdAt.slice(0, 10)}.json.gz`
+  document.body.appendChild(a); a.click(); a.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 2000)
+}
+export async function listBackupReports(id: string): Promise<BackupReport[]> {
+  const { data } = await api.get(`/api/admin/system/backups/${encodeURIComponent(id)}/reports`); return data
+}
+export async function restoreReportFromBackup(id: string, reportId: string): Promise<{ id: string; name: string; tickets: number }> {
+  const { data } = await api.post(`/api/admin/system/backups/${encodeURIComponent(id)}/restore-report`, { reportId }); return data
+}
+export async function restorePlaybooksFromBackup(id: string): Promise<{ restored: number }> {
+  const { data } = await api.post(`/api/admin/system/backups/${encodeURIComponent(id)}/restore-playbooks`); return data
+}
+export async function listTrash(): Promise<{ keepDays: number; items: TrashItem[] }> {
+  const { data } = await api.get('/api/admin/system/trash'); return data
+}
+export async function restoreFromTrash(id: string): Promise<{ id: string; name: string; tickets: number }> {
+  const { data } = await api.post(`/api/admin/system/trash/${encodeURIComponent(id)}/restore`); return data
+}
+export async function purgeFromTrash(id: string): Promise<void> {
+  await api.delete(`/api/admin/system/trash/${encodeURIComponent(id)}`)
+}
+
+// ── Take tickets out of a report (admin). Only the Dashboard copy — Jira is not touched ──
+export interface RemovedTicketInfo { key: string; summary: string | null; status: string; removedBy: string; removedAt: string }
+export async function removeTicketsFromReport(reportId: string, keys: string[]): Promise<{ removed: string[]; totalTickets: number }> {
+  const { data } = await api.post(`/api/reports/${encodeURIComponent(reportId)}/tickets/remove`, { keys }); return data
+}
+export async function restoreRemovedTickets(reportId: string, keys?: string[]): Promise<{ restored: string[]; totalTickets: number }> {
+  const { data } = await api.post(`/api/reports/${encodeURIComponent(reportId)}/tickets/restore`, keys ? { keys } : {}); return data
+}
+export async function listRemovedTickets(reportId: string): Promise<RemovedTicketInfo[]> {
+  const { data } = await api.get(`/api/reports/${encodeURIComponent(reportId)}/removed`); return data
+}

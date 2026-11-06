@@ -21,6 +21,9 @@ import settingsRouter from './routes/settings.js'
 import playbooksRouter from './routes/playbooks.js'
 import hooksRouter from './routes/hooks.js'
 import { startTicketWatcher } from './lib/watcher.js'
+import systemRouter from './routes/system.js'
+import { startKeepAwake, startTokenReminder } from './lib/system.js'
+import { startBackupSchedule } from './lib/backup.js'
 import { errorHandler } from './middleware/errorHandler.js'
 import { requireAuth, requireRole } from './middleware/requireAuth.js'
 import { withUserJira } from './middleware/jiraUser.js'
@@ -132,6 +135,7 @@ app.use('/api/jira-oauth', requireAuth, jiraOAuthRouter)
 app.use('/api/views', requireAuth, viewsRouter)
 app.use('/api/settings', requireAuth, settingsRouter)
 app.use('/api/playbooks', requireAuth, withUserJira, playbooksRouter)
+app.use('/api/admin/system', requireAuth, requireRole('admin'), systemRouter)
 app.use('/api/admin',   requireAuth, requireRole('admin'), adminRouter)
 app.use('/api/insights', requireAuth, insightsRouter) // GET = any user, POST = editor/admin (checked inside)
 
@@ -149,6 +153,9 @@ app.listen(PORT, () => {
   console.log(`[server] allowed origins: ${ALLOWED_ORIGINS.join(', ')}`)
   console.log(`[server] env: ${process.env.NODE_ENV ?? 'development'}`)
   startTicketWatcher()
+  startKeepAwake()
+  startBackupSchedule()
+  startTokenReminder()
 })
 
 export default app

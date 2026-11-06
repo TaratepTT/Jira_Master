@@ -1,3 +1,5 @@
+import { archiveReport } from '../lib/backup.js'
+import { listRemoved, removeTickets, restoreTickets } from '../lib/removedTickets.js'
 import { Router, Request, Response, NextFunction } from 'express'
 import prisma from '../lib/prisma.js'
 import {
@@ -704,6 +706,56 @@ router.get('/:id/tickets/:key/attachments/:attachmentId', async (req: Request, r
 })
 
 // ── DELETE /api/reports/:id  ──────────────────────────────────
+// ── Take tickets out of a report (admin) ──────────────────────
+// Only the Dashboard copy is removed; Jira is not touched. Undo / restore puts them back.
+const REMOVE_MAX = 500
+router.post('/:id/tickets/remove', requireRole('admin'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { id } = req.params
+    const keys = Array.isArray(req.body?.keys) ? (req.body.keys as unknown[]).map(String) : []
+    if (!keys.length) { res.status(400).json({ message: 'เลือก ticket ที่จะลบอย่างน้อย 1 ใบ' }); return }
+    if (keys.length > REMOVE_MAX) { res.status(400).json({ message: `ลบได้ครั้งละไม่เกิน ${REMOVE_MAX} ใบ` }); return }
+    const report = await prisma.report.findUnique({ where: { id }, select: { id: true, name: true } })
+    if (!report) { res.status(404).json({ message: 'ไม่พบ report นี้' }); return }
+    const user = (req as AuthedRequest).user
+    const r = await removeTickets(id, keys, user?.name ?? 'Admin')
+    if (r.removed.length) {
+      await recordAudit(user, {
+        action: 'report.tickets.remove', reportId: id,
+        summary: `ลบ ${r.removed.length} ticket ออกจาก "${report.name}" (Jira ไม่ถูกแตะ): ${r.removed.slice(0, 10).join(', ')}${r.removed.length > 10 ? ' …' : ''}`,
+        details: { keys: r.removed.slice(0, 500) },
+      })
+    }
+    res.json({ message: `ลบ ${r.removed.length} ticket ออกจาก report แล้ว`, removed: r.removed, totalTickets: r.total })
+  } catch (err) { next(err) }
+})
+
+router.get('/:id/removed', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const items = await listRemoved(req.params.id)
+    res.json(items.map(({ row: _row, ...rest }) => rest))
+  } catch (err) { next(err) }
+})
+
+router.post('/:id/tickets/restore', requireRole('admin'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { id } = req.params
+    const report = await prisma.report.findUnique({ where: { id }, select: { id: true, name: true } })
+    if (!report) { res.status(404).json({ message: 'ไม่พบ report นี้' }); return }
+    const keys = Array.isArray(req.body?.keys) ? (req.body.keys as unknown[]).map(String) : undefined
+    const user = (req as AuthedRequest).user
+    const r = await restoreTickets(id, keys, user?.name ?? 'Admin')
+    if (r.restored.length) {
+      await recordAudit(user, {
+        action: 'report.tickets.restore', reportId: id,
+        summary: `กู้คืน ${r.restored.length} ticket กลับเข้า "${report.name}": ${r.restored.slice(0, 10).join(', ')}${r.restored.length > 10 ? ' …' : ''}`,
+        details: { keys: r.restored.slice(0, 500) },
+      })
+    }
+    res.json({ message: `กู้คืน ${r.restored.length} ticket แล้ว`, restored: r.restored, totalTickets: r.total })
+  } catch (err) { next(err) }
+})
+
 router.delete('/:id', requireRole('admin'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { id } = req.params
@@ -714,6 +766,8 @@ router.delete('/:id', requireRole('admin'), async (req: Request, res: Response, 
       return
     }
 
+    // keep a copy first, so an admin can restore it from "ถังขยะ" for 30 days
+    await archiveReport(id, (req as AuthedRequest).user)
     await prisma.report.delete({ where: { id } })
     invalidateKnownTickets()
     await recordAudit((req as AuthedRequest).user, {
@@ -722,7 +776,7 @@ router.delete('/:id', requireRole('admin'), async (req: Request, res: Response, 
       details: { name: exists.name, totalTickets: exists.totalTickets },
     })
 
-    res.json({ message: 'ลบ report เรียบร้อย' })
+    res.json({ message: 'ลบ report แล้ว กู้คืนได้ที่ ถังขยะ ภายใน 30 วัน', restorable: true })
   } catch (err) {
     next(err)
   }

@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
-import api, { refreshReportFromJira, updateTicket, getJiraConnection, type BulkUpdateResponse } from '@/lib/api'
+import api, { refreshReportFromJira, updateTicket, getJiraConnection, removeTicketsFromReport, restoreRemovedTickets, type BulkUpdateResponse } from '@/lib/api'
+import RemovedTickets from '@/components/dashboard/RemovedTickets'
 import { useUrlFilters, filtersToQuery, readFilters, type DashTab } from '@/lib/useUrlFilters'
 import Tabs from '@/components/ui/Tabs'
 import ViewsMenu from '@/components/dashboard/ViewsMenu'
@@ -76,8 +77,11 @@ export default function DashboardPage() {
   const [error, setError] = useState('')
   const [highlighted, setHighlighted] = useState<Set<string>>(new Set())
   const [exportingCsv, setExportingCsv] = useState(false)
-  const { notify } = useDialog()
+  const { notify, confirm } = useDialog()
   const toast = useToast()
+  // "ลบออกจาก report" (admin): bumping this reloads the list of removed tickets
+  const [removedVersion, setRemovedVersion] = useState(0)
+  const [removing, setRemoving] = useState(false)
 
   // Filters, sort and the open ticket live in the address bar (shareable links) — lib/useUrlFilters.ts
   const [filters, setFilters] = useUrlFilters()
@@ -181,6 +185,39 @@ export default function DashboardPage() {
       setRefreshing(false)
     }
   }, [id, refreshing])
+
+  const reloadReport = useCallback(() => api.get(`/api/reports/${id}`).then(r => setData(r.data)).catch(() => { /* keep what we have */ }), [id])
+
+  // Take the ticked tickets out of this report. Only the Dashboard copy — Jira is not touched.
+  const handleRemoveSelected = useCallback(async () => {
+    if (!data || removing) return
+    const keys = data.tickets.filter(t => highlighted.has(t.key)).map(t => t.key)
+    if (!keys.length) return
+    const ok = await confirm({
+      title: `ลบ ${keys.length} ticket ออกจาก report นี้?`,
+      message: 'ticket จะหายจากรายการ และไม่ถูกนับในภาพรวม SLA และแนวโน้ม ข้อมูลใน Jira ไม่ถูกแตะ กู้คืนได้จากรายการ "ticket ที่ลบออกจาก report นี้" ใต้ตาราง',
+      detail: <span className="key">{keys.slice(0, 8).join(', ')}{keys.length > 8 ? ` และอีก ${keys.length - 8} ใบ` : ''}</span>,
+      confirmLabel: `ลบ ${keys.length} ticket`, tone: 'danger',
+    })
+    if (!ok) return
+    setRemoving(true)
+    try {
+      const r = await removeTicketsFromReport(id, keys)
+      setHighlighted(new Set())
+      await reloadReport()
+      setRemovedVersion(v => v + 1)
+      toast.show({
+        text: `ลบ ${r.removed.length} ticket ออกจาก report แล้ว`, ms: 8000,
+        action: { label: 'เลิกทำ', onClick: () => {
+          restoreRemovedTickets(id, r.removed)
+            .then(() => reloadReport()).then(() => { setRemovedVersion(v => v + 1); toast.show({ text: 'เอา ticket กลับเข้า report แล้ว', tone: 'ok' }) })
+            .catch(() => notify({ title: 'เลิกทำไม่สำเร็จ', message: 'กู้คืนได้จากรายการ ticket ที่ลบออกใต้ตาราง', tone: 'danger' }))
+        } },
+      })
+    } catch (e) {
+      await notify({ title: 'ลบไม่สำเร็จ', message: (e as { response?: { data?: { message?: string } } })?.response?.data?.message ?? 'ลองใหม่อีกครั้ง', tone: 'danger' })
+    } finally { setRemoving(false) }
+  }, [data, removing, highlighted, confirm, id, reloadReport, toast, notify])
 
   // After a bulk edit: reload the whole report so the charts/counters (BU, categories...)
   // match the new values. A failed reload is silent — the table was already patched locally.
@@ -707,6 +744,13 @@ export default function DashboardPage() {
               <h2 id="pinned-title" className="section-title">ที่เลือกไว้ <span className="text-muted num">({highlighted.size})</span></h2>
               <div className="flex gap-2">
                 {canEdit && <button onClick={() => setBulkOpen(true)} className="btn-primary">แก้ไขพร้อมกัน {highlighted.size} ใบ</button>}
+                {isAdmin && (
+                  <button onClick={handleRemoveSelected} disabled={removing} aria-busy={removing}
+                    title="เอา ticket ที่เลือกออกจาก report นี้ ข้อมูลใน Jira ไม่ถูกแตะ"
+                    className="btn hover:border-danger/50 hover:bg-danger-soft hover:text-danger">
+                    {removing ? 'กำลังลบ...' : `ลบออกจาก report ${highlighted.size} ใบ`}
+                  </button>
+                )}
                 <button onClick={() => setHighlighted(new Set())} className="btn">ล้างที่เลือก</button>
               </div>
             </div>
@@ -934,7 +978,8 @@ export default function DashboardPage() {
               </table>
             </div>
           </div>
-          <p className="mt-2 text-[12px] text-faint">คลิกแถวเพื่อเปิดรายละเอียด ลากขอบหัวตารางเพื่อปรับความกว้าง กด <kbd className="key">?</kbd> เพื่อดูคีย์ลัด</p>
+          <p className="mt-2 text-[12px] text-faint">คลิกแถวเพื่อเปิดรายละเอียด ลากขอบหัวตารางเพื่อปรับความกว้าง{isAdmin ? ' ติ๊กช่องท้ายแถวเพื่อเลือกหลายใบแล้วลบออกจาก report' : ''} กด <kbd className="key">?</kbd> เพื่อดูคีย์ลัด</p>
+          {isAdmin && <RemovedTickets reportId={id} version={removedVersion} onRestored={() => { void reloadReport() }} />}
         </section>
           </div>
         )}

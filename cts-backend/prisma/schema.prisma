@@ -218,3 +218,30 @@ model TicketCheck {
   @@index([checkedAt])
   @@map("ticket_checks")
 }
+
+/// A deleted report, kept for 30 days so an admin can restore it (report + tickets + AI summaries, gzip JSON)
+model ReportArchive {
+  id           String   @id // the report's own id, so a restore brings back the same links
+  name         String
+  totalTickets Int      @map("total_tickets")
+  deletedBy    String   @map("deleted_by")
+  deletedAt    DateTime @default(now()) @map("deleted_at")
+  payload      Bytes
+
+  @@index([deletedAt])
+  @@map("report_archives")
+}
+
+/// Snapshot of everything the app itself owns (not Jira): reports, playbooks, settings, users. Newest 8 kept.
+model Backup {
+  id        String   @id @default(uuid())
+  kind      String   // auto | manual
+  createdBy String   @map("created_by")
+  createdAt DateTime @default(now()) @map("created_at")
+  size      Int      // compressed bytes
+  counts    Json     // { reports, tickets, playbooks, ... }
+  payload   Bytes
+
+  @@index([createdAt])
+  @@map("backups")
+}

@@ -79,7 +79,7 @@ function ToastView({ item, onDone }: { item: ToastItem; onDone: () => void }) {
       <span className={`h-2 w-2 shrink-0 rounded-full ${dot}`} aria-hidden />
       <span className="min-w-0 flex-1">{item.text}</span>
       {item.action && (
-        <button type="button" onClick={item.action.onClick} className="btn-quiet h-7 shrink-0 text-accent hover:text-accent">{item.action.label}</button>
+        <button type="button" onClick={() => { item.action!.onClick(); onDone() }} className="btn-quiet h-7 shrink-0 text-accent hover:text-accent">{item.action.label}</button>
       )}
       <button type="button" onClick={onDone} aria-label="ปิด" className="shrink-0 rounded p-1 text-faint hover:bg-sunken hover:text-ink">
         <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2} aria-hidden><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
