@@ -307,6 +307,8 @@ export interface AuditLogEntry {
     text?: string
     batchId?: string
     error?: string
+    ip?: string
+    userAgent?: string
   } | null
   success: boolean
 }
@@ -662,4 +664,11 @@ export async function restoreRemovedTickets(reportId: string, keys?: string[]): 
 }
 export async function listRemovedTickets(reportId: string): Promise<RemovedTicketInfo[]> {
   const { data } = await api.get(`/api/reports/${encodeURIComponent(reportId)}/removed`); return data
+}
+
+// ── อัปเดตสถานะ order (any signed-in user; the server sends it and logs who/IP) ──
+export interface OrderStatusInput { messageId: string; jobNo: string; orderNo: string; orderTracking: string; shipmentNo: string; shipmentTracking: string }
+export interface OrderStatusResult { ok: boolean; status: number; ms: number; response: string; error?: string; ip: string; requestId: string }
+export async function sendOrderStatus(v: OrderStatusInput): Promise<OrderStatusResult> {
+  const { data } = await api.post('/api/order-status', v, { validateStatus: s => s === 200 || s === 502 }); return data
 }

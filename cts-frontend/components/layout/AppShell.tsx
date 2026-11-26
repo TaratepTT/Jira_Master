@@ -26,6 +26,7 @@ const ICON: Record<string, string> = {
   close: 'M6 18L18 6M6 6l12 12',
   back: 'M15.75 19.5L8.25 12l7.5-7.5',
   pulse: 'M3.75 12h3l2.25-6 4.5 12 2.25-6h4.5',
+  send: 'M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5',
 }
 export function Icon({ name, className = 'h-4 w-4' }: { name: keyof typeof ICON | string; className?: string }) {
   return (
@@ -87,6 +88,7 @@ export function AppNav() {
     ] },
     { label: 'ช่วยทีม L1', items: [
       { href: '/playbooks', label: 'คู่มือ L1', icon: 'playbooks', match: p => p.startsWith('/playbooks'), show: true },
+      { href: '/order-status', label: 'อัปเดตสถานะ order', icon: 'send', match: p => p.startsWith('/order-status'), show: true },
     ] },
     { label: 'ผู้ดูแลระบบ', items: [
       { href: '/admin/users', label: 'ผู้ใช้', icon: 'users', match: p => p.startsWith('/admin/users'), show: isAdmin },

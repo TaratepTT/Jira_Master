@@ -21,6 +21,7 @@ import settingsRouter from './routes/settings.js'
 import playbooksRouter from './routes/playbooks.js'
 import hooksRouter from './routes/hooks.js'
 import { startTicketWatcher } from './lib/watcher.js'
+import orderStatusRouter from './routes/orderStatus.js'
 import systemRouter from './routes/system.js'
 import { startKeepAwake, startTokenReminder } from './lib/system.js'
 import { startBackupSchedule } from './lib/backup.js'
@@ -135,6 +136,7 @@ app.use('/api/jira-oauth', requireAuth, jiraOAuthRouter)
 app.use('/api/views', requireAuth, viewsRouter)
 app.use('/api/settings', requireAuth, settingsRouter)
 app.use('/api/playbooks', requireAuth, withUserJira, playbooksRouter)
+app.use('/api/order-status', requireAuth, orderStatusRouter) // any signed-in user; every send is audited with the caller's IP
 app.use('/api/admin/system', requireAuth, requireRole('admin'), systemRouter)
 app.use('/api/admin',   requireAuth, requireRole('admin'), adminRouter)
 app.use('/api/insights', requireAuth, insightsRouter) // GET = any user, POST = editor/admin (checked inside)

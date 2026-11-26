@@ -14,6 +14,7 @@ const ACTIONS: Array<{ value: string; label: string; cls: string }> = [
   { value: 'report.create',        label: 'สร้าง report',          cls: 'bg-sunken text-ink' },
   { value: 'report.refresh',       label: 'รีเฟรชจาก Jira',        cls: 'bg-sunken text-ink' },
   { value: 'report.delete',        label: 'ลบ report',             cls: 'bg-danger-soft text-danger' },
+  { value: 'order.status.send',    label: 'อัปเดตสถานะ order',    cls: 'bg-accent-soft text-accent' },
   { value: 'report.tickets.remove', label: 'ลบ ticket ออกจาก report', cls: 'bg-danger-soft text-danger' },
   { value: 'report.tickets.restore', label: 'กู้คืน ticket เข้า report', cls: 'bg-sunken text-ink' },
   { value: 'report.restore',       label: 'กู้คืน report',         cls: 'bg-sunken text-ink' },
@@ -54,6 +55,7 @@ function Details({ d }: { d: NonNullable<AuditLogEntry['details']> }) {
       {d.text && <p className="text-muted whitespace-pre-wrap break-words"><span className="font-medium">ข้อความ:</span> {d.text}</p>}
       {d.warnings && d.warnings.length > 0 && d.warnings.map((w, i) => <p key={i} className="text-attention break-words">⚠ {w}</p>)}
       {d.error && <p className="text-danger break-words">⚠ {d.error}</p>}
+      {d.ip && <p className="text-muted break-words"><span className="font-medium">IP:</span> <span className="num">{d.ip}</span>{d.userAgent ? <span className="text-faint"> · {d.userAgent}</span> : null}</p>}
     </div>
   )
 }
@@ -136,7 +138,7 @@ export default function AdminAuditPage() {
               <div className="rounded-lg border border-line bg-surface divide-y divide-line">
                 {data?.items.map(it => {
                   const a = ACTION_BY_VALUE[it.action]
-                  const hasDetails = !!it.details && (!!it.details.changes || !!it.details.text || !!it.details.warnings?.length || !!it.details.error)
+                  const hasDetails = !!it.details && (!!it.details.changes || !!it.details.text || !!it.details.warnings?.length || !!it.details.error || !!it.details.ip)
                   const open = openId === it.id
                   return (
                     <div key={it.id} className="px-4 py-3">

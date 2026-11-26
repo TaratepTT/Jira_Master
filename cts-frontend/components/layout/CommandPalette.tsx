@@ -74,6 +74,7 @@ export default function CommandPalette({ open, onClose }: { open: boolean; onClo
       ...(canEdit ? [{ kind: 'page' as const, id: 'p-sync', title: 'ดึงข้อมูลจาก Jira', sub: 'สร้าง report ใหม่', run: () => go('/jira') }] : []),
       { kind: 'page', id: 'p-compare', title: 'เปรียบเทียบ report', sub: 'สัปดาห์นี้เทียบสัปดาห์ก่อน', run: () => go('/compare') },
       { kind: 'page', id: 'p-playbooks', title: 'คู่มือ L1', sub: 'คู่มือที่ส่งให้ L1 ใน Jira อัตโนมัติ', run: () => go('/playbooks') },
+      { kind: 'page', id: 'p-order', title: 'อัปเดตสถานะ order', sub: 'create-order-status-update', run: () => go('/order-status') },
       { kind: 'page', id: 'p-account', title: 'บัญชีของฉัน', sub: 'รหัสผ่าน และการเชื่อมบัญชี Jira', run: () => go('/account') },
       ...(isAdmin ? [
         { kind: 'page' as const, id: 'p-users', title: 'ผู้ใช้', sub: 'อนุมัติและกำหนดสิทธิ์', run: () => go('/admin/users') },
